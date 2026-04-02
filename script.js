@@ -19,7 +19,7 @@ async function startCamera() {
 startCamera();
 
 // Stable Mediapipe version
-const pose = new Pose.Pose({
+const pose = new pose.Pose({
   locateFile: (file) =>
     `https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.5/${file}`,
 });
