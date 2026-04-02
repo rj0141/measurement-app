@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Body Measurement Scanner</title>
+    <style>
+        body { font-family: Arial; text-align: center; margin: 0; padding: 0; background: #fafafa; }
+        #logo { width: 180px; height: 60px; background: #ddd; margin: 10px auto; border-radius: 6px;
+                display:flex; justify-content:center; align-items:center; color:#555; }
+        #video { width: 90%; max-width: 400px; margin-top: 10px; }
+        #measurements { text-align: left; margin: 20px auto; background: white; padding: 15px;
+                        width: 90%; max-width: 400px; border-radius: 10px; 
+                        box-shadow: 0 0 10px rgba(0,0,0,0.1); }
+        button { padding: 12px 18px; background: black; color: white; border: none; border-radius: 6px; margin-top: 10px; }
+    </style>
+</head>
+<body>
+
+    <!-- 🔶 Placeholder Branding Area -->
+    <div id="logo">Your Logo Here</div>
+
+    <h2>Body Measurement Scanner</h2>
+
+    <video id="video" autoplay playsinline></video>
+
+    <div id="measurements">
+        <h3>Measurements</h3>
+        <pre id="output">Loading...</pre>
+    </div>
+
+    <button onclick="copyMeasurements()">Copy All Measurements</button>
+
+    <!-- MediaPipe + Camera + JS -->
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/holistic"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils"></script>
+
+    <script>
+        const video = document.getElementById("video");
+        const output = document.getElementById("output");
+
+        let camera;
+
+        function distance(a, b) {
+            return Math.sqrt((a.x - b.x)**2 + (a.y - b.y)**2 + (a.z - b.z)**2);
+        }
+
+        function calculateMeasurements(landmarks) {
+            return {
+                "Shoulder Width": (distance(landmarks.leftShoulder, landmarks.rightShoulder) * 100).toFixed(1) + " cm",
+                "Chest Width": (distance(landmarks.leftShoulder, landmarks.rightHip) * 60).toFixed(1) + " cm",
+                "Arm Length": (distance(landmarks.leftShoulder, landmarks.leftWrist) * 100).toFixed(1) + " cm",
+                "Leg Length": (distance(landmarks.leftHip, landmarks.leftAnkle) * 100).toFixed(1) + " cm",
+                "Height (approx.)": (distance(landmarks.leftEar, landmarks.leftAnkle) * 200).toFixed(1) + " cm"
+            };
+        }
+
+        function onResults(results) {
+            if (!results.poseLandmarks) return;
+
+            const landmarks = {
+                leftShoulder: results.poseLandmarks[11],
+                rightShoulder: results.poseLandmarks[12],
+                leftHip: results.poseLandmarks[23],
+                rightHip: results.poseLandmarks[24],
+                leftWrist: results.poseLandmarks[15],
+                leftEar: results.poseLandmarks[7],
+                leftAnkle: results.poseLandmarks[27]
+            };
+
+            const m = calculateMeasurements(landmarks);
+
+            output.innerText = JSON.stringify(m, null, 2);
+        }
+
+        const holistic = new Holistic.Holistic({
+            locateFile: file => `https://cdn.jsdelivr.net/npm/@mediapipe/holistic/${file}`
+        });
+        holistic.setOptions({ modelComplexity: 1 });
+
+        holistic.onResults(onResults);
+
+        navigator.mediaDevices.getUserMedia({ video: true }).then(stream => {
+            video.srcObject = stream;
+            camera = new Camera(video, {
+                onFrame: async () => { await holistic.send({ image: video }); }
+            });
+            camera.start();
+        });
+
+        function copyMeasurements() {
+            navigator.clipboard.writeText(output.innerText);
+            alert("Measurements copied!");
+        }
+    </script>
+
+</body>
+</html>
