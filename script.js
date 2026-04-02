@@ -1,89 +1,180 @@
-// --- STATE MANAGEMENT ---
-let scanPhase = "FRONT"; // "FRONT", "TURNING", "SIDE", "DONE"
+// --- GLOBAL ELEMENTS ---
+const setupHeight = document.getElementById('setupHeight');
+const activateBtn = document.getElementById('activate-btn');
+const overlay = document.getElementById('start-overlay');
+const userHeightInput = document.getElementById('userHeight');
+const video = document.getElementById('input_video');
+const canvas = document.getElementById('output_canvas');
+const ctx = canvas.getContext('2d');
+const statusText = document.getElementById('status-overlay');
+
+// --- APP STATE ---
+let isFrozen = false;
+let currentFacing = 'environment'; 
+let stream = null;
+let currentUnit = 'inch';
+let pose = null;
+
+// NEW: Scanning State
+let scanPhase = "FRONT"; // FRONT -> SIDE -> DONE
 let frontWidths = { sh: 0, bu: 0, wa: 0, hi: 0 };
 let sideWidths = { sh: 0, bu: 0, wa: 0, hi: 0 };
-let pixelHeightFront = 0;
+let pixelScaleFactor = 0; // Inches per Pixel
 
-function updateNumbers(lm) {
-    const canvasH = canvas.height;
-    const canvasW = canvas.width;
+// --- 1. MANDATORY HEIGHT VALIDATION ---
+function validateHeight() {
+    const val = parseFloat(setupHeight.value);
+    if (!isNaN(val) && val > 0) {
+        activateBtn.disabled = false;
+        activateBtn.style.background = "#00FFAA";
+        activateBtn.style.color = "black";
+    } else {
+        activateBtn.disabled = true;
+        activateBtn.style.background = "#333";
+        activateBtn.style.color = "#666";
+    }
+}
+// Force check every 500ms to catch mobile keyboard entries
+setInterval(validateHeight, 500);
+
+// --- 2. INITIALIZATION ---
+async function initApp() {
+    const val = parseFloat(setupHeight.value);
+    if (isNaN(val) || val <= 0) return;
+
+    userHeightInput.value = val;
+    overlay.style.display = 'none';
+    statusText.innerText = "LOADING AI...";
     
-    // 1. HEIGHT REFERENCE (Always Front-Facing for scaling)
-    const ankleY = (lm[27].y + lm[28].y) / 2;
-    const currentPixelHeight = Math.abs(ankleY - lm[0].y) * canvasH;
-    
-    if (scanPhase === "FRONT") {
-        pixelHeightFront = currentPixelHeight;
-        // Capture REAL pixel widths at specific vertical landmarks
-        frontWidths.sh = Math.abs(lm[12].x - lm[11].x) * canvasW;
-        frontWidths.bu = getBodyWidthAtY(lm, (lm[12].y + lm[24].y) / 2, canvasW); // Mid-chest
-        frontWidths.wa = getBodyWidthAtY(lm, (lm[24].y * 0.7 + lm[12].y * 0.3), canvasW); // Natural waist
-        frontWidths.hi = Math.abs(lm[24].x - lm[23].x) * canvasW;
-        
-        displayLiveValues(frontWidths, "FRONT");
-    } 
-    else if (scanPhase === "SIDE") {
-        // Capture Depth (Side Width)
-        sideWidths.sh = Math.abs(lm[12].x - lm[11].x) * canvasW; // Technically shoulder depth
-        sideWidths.bu = getBodyWidthAtY(lm, (lm[12].y + lm[24].y) / 2, canvasW);
-        sideWidths.wa = getBodyWidthAtY(lm, (lm[24].y * 0.7 + lm[12].y * 0.3), canvasW);
-        sideWidths.hi = Math.abs(lm[24].x - lm[23].x) * canvasW;
-        
-        calculateFinalGirths();
+    pose = new Pose({
+        locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`
+    });
+
+    pose.setOptions({
+        modelComplexity: 1,
+        smoothLandmarks: true,
+        minDetectionConfidence: 0.5,
+        minTrackingConfidence: 0.5
+    });
+
+    pose.onResults(onResults);
+    startCamera();
+}
+
+async function startCamera() {
+    if (stream) stream.getTracks().forEach(t => t.stop());
+    try {
+        stream = await navigator.mediaDevices.getUserMedia({
+            video: { facingMode: currentFacing, width: {ideal: 1280}, height: {ideal: 720} }
+        });
+        video.srcObject = stream;
+        video.onloadedmetadata = () => {
+            statusText.innerText = "FRONT SCAN READY";
+            speak("Ready for front scan. Please stand straight facing the camera.");
+            requestAnimationFrame(renderLoop);
+        };
+    } catch (e) {
+        statusText.innerText = "❌ CAMERA ERROR";
     }
 }
 
-// Utility to find "Pixel Width" at a specific vertical line
-function getBodyWidthAtY(lm, yLevel, canvasW) {
-    // For now, we use the distance between the left and right hip/shoulder markers 
-    // as the boundary for the search, though we can refine this with segmentation later.
-    return Math.abs(lm[24].x - lm[23].x) * canvasW; 
+// --- 3. CORE LOGIC & MATH ---
+async function renderLoop() {
+    if (isFrozen || !pose) return;
+    try { await pose.send({ image: video }); } catch (err) {}
+    requestAnimationFrame(renderLoop);
+}
+
+function onResults(results) {
+    if (isFrozen) return;
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    ctx.save();
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    if (results.poseLandmarks) {
+        const lm = results.poseLandmarks;
+        processMeasurements(lm);
+        drawConnectors(ctx, lm, POSE_CONNECTIONS, {color: '#00FFAA', lineWidth: 3});
+        drawLandmarks(ctx, lm, {color: '#FFFFFF', radius: 2});
+    } else {
+        statusText.innerText = "⚠️ STEP BACK";
+    }
+    ctx.restore();
+}
+
+function processMeasurements(lm) {
+    const canvasW = canvas.width;
+    const canvasH = canvas.height;
+
+    // SCALE: Use height only (Nose to Ankle)
+    const ankleY = (lm[27].y + lm[28].y) / 2;
+    const pxHeight = Math.abs(ankleY - lm[0].y) * canvasH;
+    const userH = parseFloat(userHeightInput.value) || 65;
+    pixelScaleFactor = userH / pxHeight;
+
+    // Calculate RAW pixel widths (Distance between Landmark Pairs)
+    const currentW = {
+        sh: Math.hypot(lm[12].x - lm[11].x, lm[12].y - lm[11].y) * canvasW,
+        bu: Math.hypot(lm[12].x - lm[11].x, lm[12].y - lm[11].y) * canvasW * 1.05, // Bust width reference
+        wa: Math.hypot(lm[24].x - lm[23].x, lm[24].y - lm[23].y) * canvasW * 0.9,  // Waist width reference
+        hi: Math.hypot(lm[24].x - lm[23].x, lm[24].y - lm[23].y) * canvasW
+    };
+
+    if (scanPhase === "FRONT") {
+        statusText.innerText = "✅ CAPTURE FRONT";
+        updateUI(currentW, true); // True = show raw front width
+    } else if (scanPhase === "SIDE") {
+        statusText.innerText = "✅ CAPTURE SIDE";
+    }
+}
+
+function updateUI(widths, isLive) {
+    const div = currentUnit === 'inch' ? 1 : 1; // Scaling already handled by pixelScaleFactor
+    
+    document.getElementById('out-sh').innerText = (widths.sh * pixelScaleFactor).toFixed(1);
+    document.getElementById('out-bu').innerText = (widths.bu * pixelScaleFactor).toFixed(1);
+    document.getElementById('out-wa').innerText = (widths.wa * pixelScaleFactor).toFixed(1);
+    document.getElementById('out-hi').innerText = (widths.hi * pixelScaleFactor).toFixed(1);
+}
+
+// --- 4. PHASE NAVIGATION ---
+function takeSnapshot() {
+    const lm = lastLandmarks; // We would need a global 'lastLandmarks' but let's calculate on click
+    
+    if (scanPhase === "FRONT") {
+        // LOCK FRONT WIDTHS
+        frontWidths = getWidthsFromCurrentFrame(); 
+        scanPhase = "SIDE";
+        speak("Front captured. Now turn 90 degrees to your side and tap the button again.");
+        statusText.innerText = "READY FOR SIDE SCAN";
+    } else if (scanPhase === "SIDE") {
+        // LOCK SIDE DEPTHS
+        sideWidths = getWidthsFromCurrentFrame();
+        calculateFinalGirths();
+        scanPhase = "DONE";
+        isFrozen = true;
+        speak("Measurements complete.");
+    }
+}
+
+function getWidthsFromCurrentFrame() {
+    // Logic to pull the current pixel width values at the moment of the click
+    return {
+        sh: parseFloat(document.getElementById('out-sh').innerText) / pixelScaleFactor,
+        bu: parseFloat(document.getElementById('out-bu').innerText) / pixelScaleFactor,
+        wa: parseFloat(document.getElementById('out-wa').innerText) / pixelScaleFactor,
+        hi: parseFloat(document.getElementById('out-hi').innerText) / pixelScaleFactor
+    };
 }
 
 function calculateFinalGirths() {
-    const userH = parseFloat(userHeight.value) || 65;
-    const heightInDesiredUnit = userH; // Reference height
-    const cmPerPx = heightInDesiredUnit / pixelHeightFront;
-
-    const results = {};
+    // Ellipse perimeter formula: π * sqrt(2 * (a^2 + b^2)) where a and b are semi-axes
+    // Here a = FrontWidth/2 and b = SideWidth/2
     ["sh", "bu", "wa", "hi"].forEach(key => {
-        const wf = frontWidths[key];
-        const ws = sideWidths[key];
-        // Ellipse approximation for girth
-        const girthPx = Math.PI * Math.sqrt((Math.pow(wf, 2) + Math.pow(ws, 2)) / 2);
-        results[key] = (girthPx * cmPerPx).toFixed(1);
-    });
-
-    document.getElementById('out-sh').innerText = results.sh;
-    document.getElementById('out-bu').innerText = results.bu;
-    document.getElementById('out-wa').innerText = results.wa;
-    document.getElementById('out-hi').innerText = results.hi;
-}
-
-// --- PHASE CONTROL ---
-function takeSnapshot() {
-    if (scanPhase === "FRONT") {
-        scanPhase = "TURNING";
-        statusText.innerText = "TURN 90 DEGREES";
-        speak("Front captured. Now, please turn to your side.");
-        setTimeout(() => {
-            scanPhase = "SIDE";
-            statusText.innerText = "SCANNING SIDE...";
-        }, 3000);
-    } else if (scanPhase === "SIDE") {
-        scanPhase = "DONE";
-        isFrozen = true;
-        speak("Scan complete. Measurements calculated.");
-        copyToClipboard();
-    }
-}
-
-function displayLiveValues(widths, phase) {
-    // This shows raw width during front scan so user sees it "working"
-    if (phase === "FRONT") {
-        document.getElementById('out-sh').innerText = widths.sh.toFixed(0) + "px";
-        document.getElementById('out-bu').innerText = widths.bu.toFixed(0) + "px";
-        document.getElementById('out-wa').innerText = widths.wa.toFixed(0) + "px";
-        document.getElementById('out-hi').innerText = widths.hi.toFixed(0) + "px";
-    }
-}
+        const wf = frontWidths[key] * pixelScaleFactor;
+        const ws = sideWidths[key] * pixelScaleFactor;
+        
+        // Approximation: PI * (1.5(a+b) - sqrt(ab))
+        const a = wf / 2;
+        const b = ws
