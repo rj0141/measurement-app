@@ -7,7 +7,7 @@ let lastDetected = Date.now();
 const TIMEOUT = 30000; // 30 seconds timeout
 
 // Initialize Mediapipe Pose (CDN version)
-const pose = new Pose.Pose({
+const pose = new pose.Pose({
   locateFile: file =>
     `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`
 });
