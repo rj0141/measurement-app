@@ -1,0 +1,43 @@
+body {
+  margin: 0;
+  font-family: Arial, sans-serif;
+  background: #f6f6f6;
+  text-align: center;
+}
+
+header {
+  padding: 10px;
+  background: #222;
+  color: white;
+}
+
+#video, #canvas {
+  width: 90%;
+  max-width: 350px;
+  border-radius: 12px;
+  margin-top: 10px;
+}
+
+#measurements {
+  margin-top: 20px;
+  background: white;
+  padding: 15px;
+  border-radius: 10px;
+  display: inline-block;
+  text-align: left;
+}
+
+button {
+  margin-top: 15px;
+  padding: 10px 20px;
+  border: none;
+  background: #333;
+  color: white;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.brand {
+  font-size: 12px;
+  opacity: 0.7;
+}
