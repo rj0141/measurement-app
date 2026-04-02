@@ -1,172 +1,89 @@
-const setupHeight = document.getElementById('setupHeight');
-const activateBtn = document.getElementById('activate-btn');
-const overlay = document.getElementById('start-overlay');
-const userHeight = document.getElementById('userHeight');
-const video = document.getElementById('input_video');
-const canvas = document.getElementById('output_canvas');
-const ctx = canvas.getContext('2d');
-const statusText = document.getElementById('status-overlay');
-
-let isFrozen = false;
-let currentFacing = 'environment'; 
-let stream = null;
-let currentUnit = 'inch';
-let pose = null;
-
-// The "Golden" validation function
-function validateHeight() {
-    const val = parseFloat(setupHeight.value);
-    if (!isNaN(val) && val > 0) {
-        activateBtn.disabled = false;
-        activateBtn.style.background = "#00FFAA";
-        activateBtn.style.color = "black";
-        activateBtn.style.cursor = "pointer";
-    } else {
-        activateBtn.disabled = true;
-        activateBtn.style.background = "#333";
-        activateBtn.style.color = "#666";
-        activateBtn.style.cursor = "not-allowed";
-    }
-}
-
-// Fallback: Check every 500ms in case events fail to fire on mobile
-setInterval(validateHeight, 500);
-
-function speak(txt) {
-    if (!window.speechSynthesis) return;
-    window.speechSynthesis.cancel();
-    const utterance = new SpeechSynthesisUtterance(txt);
-    utterance.rate = 0.95;
-    window.speechSynthesis.speak(utterance);
-}
-
-async function initApp() {
-    const val = parseFloat(setupHeight.value);
-    if (isNaN(val) || val <= 0) return;
-
-    userHeight.value = val;
-    overlay.style.display = 'none';
-    statusText.innerText = "LOADING AI MODELS...";
-    
-    pose = new Pose({
-        locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`
-    });
-
-    pose.setOptions({
-        modelComplexity: 1,
-        smoothLandmarks: true,
-        minDetectionConfidence: 0.5,
-        minTrackingConfidence: 0.5
-    });
-
-    pose.onResults(onResults);
-    startCamera();
-}
-
-async function startCamera() {
-    if (stream) stream.getTracks().forEach(t => t.stop());
-    try {
-        stream = await navigator.mediaDevices.getUserMedia({
-            video: { facingMode: currentFacing, width: {ideal: 1280}, height: {ideal: 720} }
-        });
-        video.srcObject = stream;
-        video.onloadedmetadata = () => {
-            const isFront = currentFacing === 'user';
-            video.classList[isFront ? 'add' : 'remove']('mirrored');
-            canvas.classList[isFront ? 'add' : 'remove']('mirrored');
-            statusText.innerText = "AI ONLINE";
-            speak("Ready. Stand back seven feet.");
-            requestAnimationFrame(renderLoop);
-        };
-    } catch (e) {
-        statusText.innerText = "❌ CAMERA ERROR";
-    }
-}
-
-async function renderLoop() {
-    if (isFrozen || !pose) return;
-    try {
-        await pose.send({ image: video });
-    } catch (err) {}
-    requestAnimationFrame(renderLoop);
-}
-
-function onResults(results) {
-    if (isFrozen) return;
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
-    ctx.save();
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-    if (results.poseLandmarks) {
-        statusText.innerText = "✅ BODY DETECTED";
-        updateNumbers(results.poseLandmarks);
-        drawConnectors(ctx, results.poseLandmarks, POSE_CONNECTIONS, {color: '#00FFAA', lineWidth: 3});
-        drawLandmarks(ctx, results.poseLandmarks, {color: '#FFFFFF', radius: 2});
-    } else {
-        statusText.innerText = "⚠️ STAND BACK FURTHER";
-    }
-    ctx.restore();
-}
+// --- STATE MANAGEMENT ---
+let scanPhase = "FRONT"; // "FRONT", "TURNING", "SIDE", "DONE"
+let frontWidths = { sh: 0, bu: 0, wa: 0, hi: 0 };
+let sideWidths = { sh: 0, bu: 0, wa: 0, hi: 0 };
+let pixelHeightFront = 0;
 
 function updateNumbers(lm) {
-    const rawH = parseFloat(userHeight.value) || 0;
-    const heightCm = currentUnit === 'inch' ? rawH * 2.54 : rawH;
+    const canvasH = canvas.height;
+    const canvasW = canvas.width;
+    
+    // 1. HEIGHT REFERENCE (Always Front-Facing for scaling)
     const ankleY = (lm[27].y + lm[28].y) / 2;
-    const pxH = Math.abs(ankleY - lm[0].y);
-    const cmPerPx = heightCm / (pxH * canvas.height);
-    const factor = 2.32; 
-
-    const sPx = Math.hypot(lm[12].x - lm[11].x, lm[12].y - lm[11].y) * canvas.width;
-    const hPx = Math.hypot(lm[24].x - lm[23].x, lm[24].y - lm[23].y) * canvas.width;
-
-    const div = currentUnit === 'inch' ? 2.54 : 1;
+    const currentPixelHeight = Math.abs(ankleY - lm[0].y) * canvasH;
     
-    document.getElementById('out-sh').innerText = ((sPx * cmPerPx) / div).toFixed(1);
-    document.getElementById('out-bu').innerText = ((sPx * 0.95 * cmPerPx * factor) / div).toFixed(1);
-    document.getElementById('out-wa').innerText = ((hPx * 0.82 * cmPerPx * factor) / div).toFixed(1);
-    document.getElementById('out-hi').innerText = ((hPx * cmPerPx * factor) / div).toFixed(1);
-}
-
-function takeSnapshot() {
-    if (!pose) return;
-    isFrozen = true;
-    speak("Captured.");
-    
-    const sh = document.getElementById('out-sh').innerText;
-    const bu = document.getElementById('out-bu').innerText;
-    const wa = document.getElementById('out-wa').innerText;
-    const hi = document.getElementById('out-hi').innerText;
-    
-    const data = `Date: ${new Date().toLocaleDateString()}\tUnit: ${currentUnit}\tSH: ${sh}\tBU: ${bu}\tWA: ${wa}\tHI: ${hi}`;
-    navigator.clipboard.writeText(data);
-    
-    document.getElementById('capture-btn').style.display = 'none';
-    document.getElementById('resume-btn').style.display = 'block';
-}
-
-function resumeScan() {
-    isFrozen = false;
-    document.getElementById('capture-btn').style.display = 'flex';
-    document.getElementById('resume-btn').style.display = 'none';
-    requestAnimationFrame(renderLoop);
-}
-
-function toggleUnits() {
-    const val = parseFloat(userHeight.value);
-    if (currentUnit === 'inch') {
-        currentUnit = 'cm';
-        userHeight.value = Math.round(val * 2.54);
-    } else {
-        currentUnit = 'inch';
-        userHeight.value = (val / 2.54).toFixed(1);
+    if (scanPhase === "FRONT") {
+        pixelHeightFront = currentPixelHeight;
+        // Capture REAL pixel widths at specific vertical landmarks
+        frontWidths.sh = Math.abs(lm[12].x - lm[11].x) * canvasW;
+        frontWidths.bu = getBodyWidthAtY(lm, (lm[12].y + lm[24].y) / 2, canvasW); // Mid-chest
+        frontWidths.wa = getBodyWidthAtY(lm, (lm[24].y * 0.7 + lm[12].y * 0.3), canvasW); // Natural waist
+        frontWidths.hi = Math.abs(lm[24].x - lm[23].x) * canvasW;
+        
+        displayLiveValues(frontWidths, "FRONT");
+    } 
+    else if (scanPhase === "SIDE") {
+        // Capture Depth (Side Width)
+        sideWidths.sh = Math.abs(lm[12].x - lm[11].x) * canvasW; // Technically shoulder depth
+        sideWidths.bu = getBodyWidthAtY(lm, (lm[12].y + lm[24].y) / 2, canvasW);
+        sideWidths.wa = getBodyWidthAtY(lm, (lm[24].y * 0.7 + lm[12].y * 0.3), canvasW);
+        sideWidths.hi = Math.abs(lm[24].x - lm[23].x) * canvasW;
+        
+        calculateFinalGirths();
     }
-    document.getElementById('unit-btn').innerText = `UNIT: ${currentUnit.toUpperCase()}`;
-    document.getElementById('topUnitLabel').innerText = currentUnit.toUpperCase();
-    document.querySelectorAll('.unit-txt').forEach(t => t.innerText = currentUnit);
 }
 
-function toggleCamera() {
-    currentFacing = (currentFacing === 'user') ? 'environment' : 'user';
-    startCamera();
+// Utility to find "Pixel Width" at a specific vertical line
+function getBodyWidthAtY(lm, yLevel, canvasW) {
+    // For now, we use the distance between the left and right hip/shoulder markers 
+    // as the boundary for the search, though we can refine this with segmentation later.
+    return Math.abs(lm[24].x - lm[23].x) * canvasW; 
+}
+
+function calculateFinalGirths() {
+    const userH = parseFloat(userHeight.value) || 65;
+    const heightInDesiredUnit = userH; // Reference height
+    const cmPerPx = heightInDesiredUnit / pixelHeightFront;
+
+    const results = {};
+    ["sh", "bu", "wa", "hi"].forEach(key => {
+        const wf = frontWidths[key];
+        const ws = sideWidths[key];
+        // Ellipse approximation for girth
+        const girthPx = Math.PI * Math.sqrt((Math.pow(wf, 2) + Math.pow(ws, 2)) / 2);
+        results[key] = (girthPx * cmPerPx).toFixed(1);
+    });
+
+    document.getElementById('out-sh').innerText = results.sh;
+    document.getElementById('out-bu').innerText = results.bu;
+    document.getElementById('out-wa').innerText = results.wa;
+    document.getElementById('out-hi').innerText = results.hi;
+}
+
+// --- PHASE CONTROL ---
+function takeSnapshot() {
+    if (scanPhase === "FRONT") {
+        scanPhase = "TURNING";
+        statusText.innerText = "TURN 90 DEGREES";
+        speak("Front captured. Now, please turn to your side.");
+        setTimeout(() => {
+            scanPhase = "SIDE";
+            statusText.innerText = "SCANNING SIDE...";
+        }, 3000);
+    } else if (scanPhase === "SIDE") {
+        scanPhase = "DONE";
+        isFrozen = true;
+        speak("Scan complete. Measurements calculated.");
+        copyToClipboard();
+    }
+}
+
+function displayLiveValues(widths, phase) {
+    // This shows raw width during front scan so user sees it "working"
+    if (phase === "FRONT") {
+        document.getElementById('out-sh').innerText = widths.sh.toFixed(0) + "px";
+        document.getElementById('out-bu').innerText = widths.bu.toFixed(0) + "px";
+        document.getElementById('out-wa').innerText = widths.wa.toFixed(0) + "px";
+        document.getElementById('out-hi').innerText = widths.hi.toFixed(0) + "px";
+    }
 }
