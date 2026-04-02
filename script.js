@@ -1,45 +1,40 @@
-const videoElement = document.getElementById('input_video');
-const canvasElement = document.getElementById('output_canvas');
-const canvasCtx = canvasElement.getContext('2d');
-const statusOverlay = document.getElementById('status-overlay');
-const heightInput = document.getElementById('userHeight');
-const startOverlay = document.getElementById('start-overlay');
+const video = document.getElementById('input_video');
+const canvas = document.getElementById('output_canvas');
+const ctx = canvas.getContext('2d');
+const statusText = document.getElementById('status-overlay');
+const heightInp = document.getElementById('userHeight');
+const overlay = document.getElementById('start-overlay');
 
 let isFrozen = false;
-let currentFacingMode = 'user';
+let currentFacing = 'environment'; // Default to BACK camera
 let stream = null;
-let currentLandmarks = null;
-let currentUnit = 'cm';
-let poseEngine = null;
+let currentUnit = 'inch';
+let pose = null;
 
-// Fix: Voice Instructions
-function speak(text) {
+function speak(txt) {
     if (!window.speechSynthesis) return;
     window.speechSynthesis.cancel();
-    const msg = new SpeechSynthesisUtterance(text);
-    msg.rate = 0.9; // Slightly slower for clarity
-    window.speechSynthesis.speak(msg);
+    const utterance = new SpeechSynthesisUtterance(txt);
+    utterance.rate = 0.95;
+    window.speechSynthesis.speak(utterance);
 }
 
-// Master Initialization on User Click
 async function initApp() {
-    startOverlay.style.display = 'none';
-    statusOverlay.innerText = "INITIALIZING AI...";
+    overlay.style.display = 'none';
+    statusText.innerText = "LOADING AI MODELS...";
     
-    poseEngine = new Pose({
+    pose = new Pose({
         locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`
     });
 
-    poseEngine.setOptions({
+    pose.setOptions({
         modelComplexity: 1,
         smoothLandmarks: true,
         minDetectionConfidence: 0.5,
         minTrackingConfidence: 0.5
     });
 
-    poseEngine.onResults(onResults);
-    
-    // Start Camera ONLY after Pose engine is defined
+    pose.onResults(onResults);
     startCamera();
 }
 
@@ -48,126 +43,117 @@ async function startCamera() {
     
     try {
         stream = await navigator.mediaDevices.getUserMedia({
-            video: { facingMode: currentFacingMode, width: 1280, height: 720 }
+            video: { facingMode: currentFacing, width: {ideal: 1280}, height: {ideal: 720} }
         });
-        videoElement.srcObject = stream;
+        video.srcObject = stream;
         
-        videoElement.onloadedmetadata = () => {
-            const isFront = currentFacingMode === 'user';
-            videoElement.classList[isFront ? 'add' : 'remove']('mirrored');
-            canvasElement.classList[isFront ? 'add' : 'remove']('mirrored');
+        video.onloadedmetadata = () => {
+            const isFront = currentFacing === 'user';
+            video.classList[isFront ? 'add' : 'remove']('mirrored');
+            canvas.classList[isFront ? 'add' : 'remove']('mirrored');
             
-            statusOverlay.innerText = "AI READY";
-            speak("Welcome. Please stand back so I can see your whole body.");
-            requestAnimationFrame(processFrame);
+            statusText.innerText = "AI ONLINE";
+            speak("Ready. Stand roughly seven feet back.");
+            requestAnimationFrame(renderLoop);
         };
     } catch (e) {
-        statusOverlay.innerText = "❌ CAMERA ERROR";
-        alert("Please enable camera access in settings.");
+        statusText.innerText = "❌ CAMERA ERROR";
+        alert("Camera access is required for scanning.");
     }
 }
 
-async function processFrame() {
-    if (isFrozen || !poseEngine) return;
+async function renderLoop() {
+    if (isFrozen || !pose) return;
     try {
-        await poseEngine.send({ image: videoElement });
+        await pose.send({ image: video });
     } catch (err) {
-        console.error("Frame skip");
+        console.log("Processing skip");
     }
-    requestAnimationFrame(processFrame);
+    requestAnimationFrame(renderLoop);
 }
 
 function onResults(results) {
     if (isFrozen) return;
     
-    canvasElement.width = videoElement.videoWidth;
-    canvasElement.height = videoElement.videoHeight;
-    canvasCtx.save();
-    canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    ctx.save();
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
 
     if (results.poseLandmarks) {
-        currentLandmarks = results.poseLandmarks;
-        statusOverlay.innerText = "✅ SCANNING...";
+        statusText.innerText = "✅ BODY DETECTED";
+        const lm = results.poseLandmarks;
         
-        updateStats();
+        // 1. Logic
+        updateNumbers(lm);
 
-        // Visual Overlay
-        drawConnectors(canvasCtx, currentLandmarks, POSE_CONNECTIONS, {color: '#00FFAA', lineWidth: 2});
-        drawLandmarks(canvasCtx, currentLandmarks, {color: '#FFFFFF', radius: 1});
+        // 2. Drawing
+        drawConnectors(ctx, lm, POSE_CONNECTIONS, {color: '#00FFAA', lineWidth: 3});
+        drawLandmarks(ctx, lm, {color: '#FFFFFF', radius: 2});
     } else {
-        statusOverlay.innerText = "⚠️ STEP BACK";
+        statusText.innerText = "⚠️ STAND BACK FURTHER";
     }
-    canvasCtx.restore();
+    ctx.restore();
 }
 
-function updateStats() {
-    const lm = currentLandmarks;
-    const userH = parseFloat(heightInput.value) || 165;
-    const heightInCm = currentUnit === 'inch' ? userH * 2.54 : userH;
+function updateNumbers(lm) {
+    const userH = parseFloat(heightInp.value) || 65;
+    const heightCm = currentUnit === 'inch' ? userH * 2.54 : userH;
     
-    // Dist from nose (0) to avg ankle (27,28)
+    // Scale: Nose to Ankles
     const ankleY = (lm[27].y + lm[28].y) / 2;
-    const pixelHeight = Math.abs(ankleY - lm[0].y);
-    const cmPerPx = heightInCm / (pixelHeight * canvasElement.height);
+    const pxH = Math.abs(ankleY - lm[0].y);
+    const cmPerPx = heightCm / (pxH * canvas.height);
     const factor = 2.32; 
 
-    const sPx = Math.hypot(lm[12].x - lm[11].x, lm[12].y - lm[11].y) * canvasElement.width;
-    const hPx = Math.hypot(lm[24].x - lm[23].x, lm[24].y - lm[23].y) * canvasElement.width;
+    const sPx = Math.hypot(lm[12].x - lm[11].x, lm[12].y - lm[11].y) * canvas.width;
+    const hPx = Math.hypot(lm[24].x - lm[23].x, lm[24].y - lm[23].y) * canvas.width;
 
     const div = currentUnit === 'inch' ? 2.54 : 1;
     
-    document.getElementById('out-shoulder').innerText = ((sPx * cmPerPx) / div).toFixed(1);
-    document.getElementById('out-bust').innerText = ((sPx * 0.95 * cmPerPx * factor) / div).toFixed(1);
-    document.getElementById('out-waist').innerText = ((hPx * 0.82 * cmPerPx * factor) / div).toFixed(1);
-    document.getElementById('out-hips').innerText = ((hPx * cmPerPx * factor) / div).toFixed(1);
+    document.getElementById('out-sh').innerText = ((sPx * cmPerPx) / div).toFixed(1);
+    document.getElementById('out-bu').innerText = ((sPx * 0.95 * cmPerPx * factor) / div).toFixed(1);
+    document.getElementById('out-wa').innerText = ((hPx * 0.82 * cmPerPx * factor) / div).toFixed(1);
+    document.getElementById('out-hi').innerText = ((hPx * cmPerPx * factor) / div).toFixed(1);
 }
 
-function captureData() {
-    if (!currentLandmarks) {
-        speak("I cannot see you clearly enough to capture.");
-        return;
-    }
+function takeSnapshot() {
     isFrozen = true;
-    speak("Measurements captured. Ready to copy.");
+    speak("Snapshot captured. Copied to clipboard.");
     
-    const s = document.getElementById('out-shoulder').innerText;
-    const b = document.getElementById('out-bust').innerText;
-    const w = document.getElementById('out-waist').innerText;
-    const h = document.getElementById('out-hips').innerText;
+    const sh = document.getElementById('out-sh').innerText;
+    const bu = document.getElementById('out-bu').innerText;
+    const wa = document.getElementById('out-wa').innerText;
+    const hi = document.getElementById('out-hi').innerText;
     
-    let data = `${new Date().toLocaleDateString()}\t${currentUnit}\t${s}\t${b}\t${w}\t${h}`;
-    currentLandmarks.forEach((p, i) => { data += `\tL${i}:${p.x.toFixed(3)},${p.y.toFixed(3)}`; });
-    
-    navigator.clipboard.writeText(data).then(() => {
-        statusOverlay.innerText = "📋 COPIED TO CLIPBOARD";
-    });
+    const data = `Date: ${new Date().toLocaleDateString()}\tUnit: ${currentUnit}\tSH: ${sh}\tBU: ${bu}\tWA: ${wa}\tHI: ${hi}`;
+    navigator.clipboard.writeText(data);
     
     document.getElementById('capture-btn').style.display = 'none';
     document.getElementById('resume-btn').style.display = 'block';
 }
 
-function resumeScanning() {
+function resumeScan() {
     isFrozen = false;
     document.getElementById('capture-btn').style.display = 'flex';
     document.getElementById('resume-btn').style.display = 'none';
-    speak("Resuming scanner.");
-    requestAnimationFrame(processFrame);
+    requestAnimationFrame(renderLoop);
 }
 
 function toggleUnits() {
-    const val = parseFloat(heightInput.value);
-    if (currentUnit === 'cm') {
-        currentUnit = 'inch';
-        heightInput.value = (val / 2.54).toFixed(1);
-    } else {
+    const val = parseFloat(heightInp.value);
+    if (currentUnit === 'inch') {
         currentUnit = 'cm';
-        heightInput.value = (val * 2.54).toFixed(0);
+        heightInp.value = Math.round(val * 2.54);
+    } else {
+        currentUnit = 'inch';
+        heightInp.value = (val / 2.54).toFixed(1);
     }
-    document.getElementById('height-unit-text').innerText = currentUnit.toUpperCase();
-    document.querySelectorAll('.unit-text').forEach(el => el.innerText = currentUnit);
+    document.getElementById('unit-btn').innerText = currentUnit.toUpperCase();
+    document.querySelectorAll('.unit-txt').forEach(t => t.innerText = currentUnit);
 }
 
 function toggleCamera() {
-    currentFacingMode = (currentFacingMode === 'user') ? 'environment' : 'user';
+    currentFacing = (currentFacing === 'user') ? 'environment' : 'user';
     startCamera();
 }
