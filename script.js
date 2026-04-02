@@ -1,67 +1,131 @@
 const videoElement = document.getElementById('input_video');
 const canvasElement = document.getElementById('output_canvas');
 const canvasCtx = canvasElement.getContext('2d');
+const statusOverlay = document.getElementById('status-overlay');
 const heightInput = document.getElementById('userHeight');
 
-let userHeightCm = 165;
-let currentResults = { shoulder:0, bust:0, waist:0, hips:0 };
-let currentFacingMode = 'user'; // 'user' is front, 'environment' is back
+let isFrozen = false;
+let lastDetectionTime = Date.now();
+let currentFacingMode = 'user';
 let stream = null;
+let currentLandmarks = null;
+let currentMeasurements = {};
 
-function updateHeight() {
-    userHeightCm = parseFloat(heightInput.value) || 165;
+// Voice Synthesis Setup
+function speak(text) {
+    const msg = new SpeechSynthesisUtterance(text);
+    window.speechSynthesis.cancel(); // Stop current speech
+    window.speechSynthesis.speak(msg);
 }
 
-const CIRCUMFERENCE_FACTOR = 2.32;
-
 const pose = new window.Pose({
-  locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`
+    locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`
 });
 
-pose.setOptions({
-  modelComplexity: 1,
-  smoothLandmarks: true,
-  selfieMode: false // We handle mirroring manually for better control
-});
+pose.setOptions({ modelComplexity: 1, smoothLandmarks: true, selfieMode: false });
+pose.onResults(onResults);
 
 async function startCamera() {
-    if (stream) {
-        stream.getTracks().forEach(track => track.stop());
-    }
-
-    const constraints = {
-        video: {
-            facingMode: currentFacingMode,
-            width: { ideal: 1920 },
-            height: { ideal: 1080 }
-        }
-    };
-
+    if (stream) stream.getTracks().forEach(t => t.stop());
+    const constraints = { video: { facingMode: currentFacingMode, width: 1280, height: 720 } };
     try {
         stream = await navigator.mediaDevices.getUserMedia(constraints);
         videoElement.srcObject = stream;
-        
-        // Apply mirroring only if using front camera
-        if (currentFacingMode === 'user') {
-            videoElement.classList.add('mirrored');
-            canvasElement.classList.add('mirrored');
-        } else {
-            videoElement.classList.remove('mirrored');
-            canvasElement.classList.remove('mirrored');
-        }
-
-        // Start processing frames
+        const mode = currentFacingMode === 'user' ? 'add' : 'remove';
+        videoElement.classList[mode]('mirrored');
+        canvasElement.classList[mode]('mirrored');
         requestAnimationFrame(processVideo);
-    } catch (err) {
-        console.error("Camera Error: ", err);
-        alert("Could not access camera. Ensure you are on HTTPS.");
-    }
+        speak("Camera ready. Please stand back to show your full body.");
+    } catch (e) { alert("Camera access denied."); }
 }
 
 async function processVideo() {
-    if (videoElement.paused || videoElement.ended) return;
-    await pose.send({image: videoElement});
+    if (isFrozen || !stream) return;
+    await pose.send({ image: videoElement });
+    
+    // Check for inactivity
+    if (Date.now() - lastDetectionTime > 30000) {
+        statusOverlay.innerText = "⚠️ Adjust lighting or step back";
+        speak("I am having trouble seeing you. Please adjust the light or step back.");
+        lastDetectionTime = Date.now(); // Reset to avoid constant talking
+    }
     requestAnimationFrame(processVideo);
+}
+
+function onResults(results) {
+    if (isFrozen) return;
+    canvasElement.width = videoElement.videoWidth;
+    canvasElement.height = videoElement.videoHeight;
+    canvasCtx.save();
+    canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+
+    if (results.poseLandmarks) {
+        lastDetectionTime = Date.now();
+        currentLandmarks = results.poseLandmarks;
+        calculateBodyStats(currentLandmarks);
+        statusOverlay.innerText = "✅ Ready to Capture";
+        
+        window.drawConnectors(canvasCtx, currentLandmarks, window.POSE_CONNECTIONS, {color: '#00FFAA', lineWidth: 2});
+        window.drawLandmarks(canvasCtx, currentLandmarks, {color: '#FFFFFF', radius: 1});
+    } else {
+        statusOverlay.innerText = "❌ Body not fully visible";
+    }
+    canvasCtx.restore();
+}
+
+function calculateBodyStats(lm) {
+    const userH = parseFloat(heightInput.value) || 165;
+    const ankleY = (lm[27].y + lm[28].y) / 2;
+    const pixelHeight = Math.abs(ankleY - lm[0].y);
+    const cmPerPx = userH / (pixelHeight * canvasElement.height);
+    const girthFactor = 2.32;
+
+    const shoulderPx = Math.hypot(lm[12].x - lm[11].x, lm[12].y - lm[11].y) * canvasElement.width;
+    const hipPx = Math.hypot(lm[24].x - lm[23].x, lm[24].y - lm[23].y) * canvasElement.width;
+
+    currentMeasurements = {
+        shoulders: (shoulderPx * cmPerPx).toFixed(1),
+        bust: (shoulderPx * 0.95 * cmPerPx * girthFactor).toFixed(1),
+        waist: (hipPx * 0.82 * cmPerPx * girthFactor).toFixed(1),
+        hips: (hipPx * cmPerPx * girthFactor).toFixed(1)
+    };
+
+    document.getElementById('out-shoulder').innerText = currentMeasurements.shoulders + " cm";
+    document.getElementById('out-bust').innerText = currentMeasurements.bust + " cm";
+    document.getElementById('out-waist').innerText = currentMeasurements.waist + " cm";
+    document.getElementById('out-hips').innerText = currentMeasurements.hips + " cm";
+}
+
+function captureData() {
+    if (!currentLandmarks) {
+        speak("I can't see a body to capture. Try again.");
+        return;
+    }
+    
+    isFrozen = true;
+    speak("Measurements captured and copied. Now, please turn 90 degrees to your side if you need a profile scan.");
+    
+    // Prepare Data for Google Sheets
+    // Column 1-5: Date & Main Stats | Column 6+: All 33 Landmark Coords
+    let exportData = `${new Date().toLocaleDateString()}\t${currentMeasurements.shoulders}\t${currentMeasurements.bust}\t${currentMeasurements.waist}\t${currentMeasurements.hips}`;
+    
+    currentLandmarks.forEach((point, i) => {
+        exportData += `\tL${i}_X:${point.x.toFixed(4)},Y:${point.y.toFixed(4)},Z:${point.z.toFixed(4)}`;
+    });
+
+    navigator.clipboard.writeText(exportData);
+    
+    document.getElementById('capture-btn').style.display = 'none';
+    document.getElementById('resume-btn').style.display = 'block';
+    statusOverlay.innerText = "❄️ SCAN FROZEN";
+}
+
+function resumeScanning() {
+    isFrozen = false;
+    document.getElementById('capture-btn').style.display = 'block';
+    document.getElementById('resume-btn').style.display = 'none';
+    requestAnimationFrame(processVideo);
+    speak("Resuming scan.");
 }
 
 function toggleCamera() {
@@ -69,58 +133,4 @@ function toggleCamera() {
     startCamera();
 }
 
-function onResults(results) {
-  canvasElement.width = videoElement.videoWidth;
-  canvasElement.height = videoElement.videoHeight;
-  
-  canvasCtx.save();
-  canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
-
-  if (results.poseLandmarks) {
-    const lm = results.poseLandmarks;
-
-    // HEIGHT CALIBRATION
-    const ankleY = (lm[27].y + lm[28].y) / 2;
-    const pixelHeight = Math.abs(ankleY - lm[0].y);
-    const cmPerPixel = userHeightCm / (pixelHeight * canvasElement.height);
-
-    // LANDMARK CALCULATION
-    const shoulderPx = Math.hypot(lm[12].x - lm[11].x, lm[12].y - lm[11].y) * canvasElement.width;
-    const shoulderCm = shoulderPx * cmPerPixel;
-
-    const hipPx = Math.hypot(lm[24].x - lm[23].x, lm[24].y - lm[23].y) * canvasElement.width;
-    const hipCm = hipPx * cmPerPixel;
-
-    // BUST & WAIST INTERPOLATION
-    const bustWidthCm = shoulderCm * 0.95; 
-    const waistWidthCm = hipCm * 0.85;
-
-    currentResults.shoulder = shoulderCm.toFixed(1);
-    currentResults.bust = (bustWidthCm * CIRCUMFERENCE_FACTOR).toFixed(1);
-    currentResults.waist = (waistWidthCm * CIRCUMFERENCE_FACTOR).toFixed(1);
-    currentResults.hips = (hipCm * CIRCUMFERENCE_FACTOR).toFixed(1);
-
-    // Update UI
-    document.getElementById('out-shoulder').innerText = currentResults.shoulder + " cm";
-    document.getElementById('out-bust').innerText = currentResults.bust + " cm";
-    document.getElementById('out-waist').innerText = currentResults.waist + " cm";
-    document.getElementById('out-hips').innerText = currentResults.hips + " cm";
-
-    // Draw Skeleton
-    window.drawConnectors(canvasCtx, lm, window.POSE_CONNECTIONS, {color: '#00FFAA', lineWidth: 2});
-    window.drawLandmarks(canvasCtx, lm, {color: '#FFFFFF', radius: 2});
-  }
-  canvasCtx.restore();
-}
-
-pose.onResults(onResults);
-
-// Initialize
 startCamera();
-
-function copyToClipboard() {
-    const data = `${new Date().toLocaleDateString()}\t${currentResults.shoulder}\t${currentResults.bust}\t${currentResults.waist}\t${currentResults.hips}`;
-    navigator.clipboard.writeText(data).then(() => {
-        alert("Measurements copied!");
-    });
-}
