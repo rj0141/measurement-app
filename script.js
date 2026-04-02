@@ -4,12 +4,14 @@ const ctx = canvas.getContext("2d");
 const errorBox = document.getElementById("errorBox");
 
 let lastDetected = Date.now();
-const TIMEOUT = 30000; // 30 seconds timeout
+const TIMEOUT = 30000; // 30 seconds
 
-// Initialize Mediapipe Pose (CDN version)
-const pose = new Pose.Pose({
-  locateFile: file =>
-    `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`
+// Initialize Mediapipe Pose
+// Using window.Pose to ensure it pulls from the CDN global scope correctly
+const pose = new window.Pose({
+  locateFile: (file) => {
+    return `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`;
+  }
 });
 
 pose.setOptions({
@@ -25,8 +27,11 @@ pose.onResults(onPoseDetected);
 // Pose detection callback
 // ================================
 function onPoseDetected(results) {
+  // Set canvas dimensions to match video stream
   canvas.width = video.videoWidth;
   canvas.height = video.videoHeight;
+  
+  ctx.save();
   ctx.clearRect(0, 0, canvas.width, canvas.height);
 
   // If no person detected
@@ -40,26 +45,28 @@ function onPoseDetected(results) {
   hideError();
   lastDetected = Date.now();
 
-  // Draw connectors & landmarks
-  drawConnectors(ctx, results.poseLandmarks, POSE_CONNECTIONS,
+  // Draw connectors & landmarks using the global DrawingUtils functions
+  window.drawConnectors(ctx, results.poseLandmarks, window.POSE_CONNECTIONS,
     { color: "#00FFAA", lineWidth: 4 });
 
-  drawLandmarks(ctx, results.poseLandmarks,
+  window.drawLandmarks(ctx, results.poseLandmarks,
     { color: "#FFDD55", radius: 5 });
 
-  // Future: Your measurement logic goes here
+  ctx.restore();
 }
 
 // ================================
 // Camera setup
 // ================================
-const camera = new Camera(video, {
+const camera = new window.Camera(video, {
   onFrame: async () => {
     await pose.send({ image: video });
   },
-  width: 720,
-  height: 1280,
+  width: 1280,
+  height: 720,
 });
+
+// Start the camera
 camera.start();
 
 // ================================
