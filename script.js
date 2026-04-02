@@ -13,11 +13,24 @@ let stream = null;
 let currentUnit = 'inch';
 let pose = null;
 
+// NEW: More robust validation
 function validateHeight() {
-    // Enable button only if height is entered and greater than 0
     const val = parseFloat(setupHeight.value);
-    activateBtn.disabled = !(val > 0);
+    if (!isNaN(val) && val > 0) {
+        activateBtn.disabled = false;
+        activateBtn.style.background = "#00FFAA";
+        activateBtn.style.color = "black";
+    } else {
+        activateBtn.disabled = true;
+        activateBtn.style.background = "#333";
+        activateBtn.style.color = "#666";
+    }
 }
+
+// Add listeners to ensure it captures every keystroke
+setupHeight.addEventListener('input', validateHeight);
+setupHeight.addEventListener('change', validateHeight);
+setupHeight.addEventListener('keyup', validateHeight);
 
 function speak(txt) {
     if (!window.speechSynthesis) return;
@@ -28,9 +41,13 @@ function speak(txt) {
 }
 
 async function initApp() {
-    // Sync the height from setup to the main UI
-    userHeight.value = setupHeight.value;
-    
+    const val = parseFloat(setupHeight.value);
+    if (isNaN(val) || val <= 0) {
+        alert("Please enter a valid height first.");
+        return;
+    }
+
+    userHeight.value = val;
     overlay.style.display = 'none';
     statusText.innerText = "LOADING AI MODELS...";
     
@@ -66,6 +83,7 @@ async function startCamera() {
         };
     } catch (e) {
         statusText.innerText = "❌ CAMERA ERROR";
+        console.error(e);
     }
 }
 
