@@ -3,61 +3,56 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Body Measurement Scanner</title>
-
+  <title>Women's Clothing Scanner</title>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
 
   <style>
-    body { margin: 0; background: #000; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; color: white; }
-    #videoElement { width: 100vw; height: auto; transform: scaleX(-1); }
-    #outputCanvas { position: absolute; left: 0; top: 0; width: 100vw; height: auto; transform: scaleX(-1); pointer-events: none; }
+    body { margin: 0; background: #111; font-family: sans-serif; color: white; display: flex; }
+    #container { position: relative; width: 70vw; height: 100vh; background: #000; overflow: hidden; }
+    video, canvas { position: absolute; top:0; left:0; width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); }
     
-    /* Measurement Overlay */
-    #measurementsPanel {
-      position: absolute;
-      top: 20px;
-      right: 20px;
-      background: rgba(0, 0, 0, 0.8);
-      padding: 20px;
-      border-radius: 12px;
-      border: 1px solid #00FFAA;
-      width: 220px;
-    }
-    .m-item { display: flex; justify-content: space-between; margin-bottom: 10px; font-size: 18px; }
-    .m-label { color: #aaa; }
-    .m-val { color: #00FFAA; font-weight: bold; }
+    #sidebar { width: 30vw; padding: 25px; background: #1a1a1a; box-sizing: border-box; border-left: 2px solid #00FFAA; }
+    .input-group { margin-bottom: 20px; }
+    input { width: 100%; padding: 10px; border-radius: 5px; border: none; font-size: 16px; margin-top: 5px; }
     
-    button {
-      width: 100%;
-      padding: 12px;
-      background: #00FFAA;
-      border: none;
-      border-radius: 6px;
-      color: black;
-      font-weight: bold;
-      cursor: pointer;
-      margin-top: 10px;
-    }
-    button:active { opacity: 0.8; }
-    #errorBox { position: absolute; top: 10px; left: 50%; transform: translateX(-50%); color: #ff4c4c; background: rgba(0,0,0,0.6); padding: 10px; border-radius: 5px; display: none; }
+    .stats { background: #222; padding: 15px; border-radius: 8px; margin-bottom: 20px; }
+    .m-row { display: flex; justify-content: space-between; margin: 10px 0; border-bottom: 1px solid #333; padding-bottom: 5px; }
+    .val { color: #00FFAA; font-weight: bold; font-size: 1.2em; }
+    
+    button { width: 100%; padding: 15px; background: #00FFAA; color: #000; border: none; font-weight: bold; cursor: pointer; border-radius: 5px; }
+    button:hover { background: #00e699; }
   </style>
 </head>
 <body>
-  <div id="errorBox"></div>
-  <video id="videoElement" autoplay playsinline></video>
-  <canvas id="outputCanvas"></canvas>
 
-  <div id="measurementsPanel">
-    <h3 style="margin-top:0">Body Stats (cm)</h3>
-    <div class="m-item"><span class="m-label">Shoulders:</span> <span id="val-shoulders" class="m-val">--</span></div>
-    <div class="m-item"><span class="m-label">Chest:</span> <span id="val-chest" class="m-val">--</span></div>
-    <div class="m-item"><span class="m-label">Waist:</span> <span id="val-waist" class="m-val">--</span></div>
-    <div class="m-item"><span class="m-label">Hips:</span> <span id="val-hips" class="m-val">--</span></div>
-    <button onclick="copyToClipboard()">Copy for Google Sheets</button>
+<div id="container">
+  <video id="input_video"></video>
+  <canvas id="output_canvas"></canvas>
+</div>
+
+<div id="sidebar">
+  <h2>Scanner Settings</h2>
+  <div class="input-group">
+    <label>Your Height (cm):</label>
+    <input type="number" id="userHeight" value="165" oninput="updateHeight()">
   </div>
 
-  <script src="script.js"></script>
+  <div class="stats">
+    <h3>Estimated Girth (cm)</h3>
+    <div class="m-row"><span>Shoulder Width:</span> <span id="out-shoulder" class="val">--</span></div>
+    <div class="m-row"><span>Bust/Chest:</span> <span id="out-bust" class="val">--</span></div>
+    <div class="m-row"><span>Waist:</span> <span id="out-waist" class="val">--</span></div>
+    <div class="m-row"><span>Hips:</span> <span id="out-hips" class="val">--</span></div>
+  </div>
+
+  <button onclick="copyToClipboard()">Copy for Google Sheets</button>
+  <p style="font-size: 12px; color: #888; margin-top: 15px;">
+    *Stand 2-3 meters away. Wear fitted clothing for accuracy.
+  </p>
+</div>
+
+<script src="script.js"></script>
 </body>
 </html>
