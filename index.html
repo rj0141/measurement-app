@@ -3,47 +3,50 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-  <title>AI Body Scanner Pro</title>
+  <title>AI Body Scanner - Inches Pro</title>
   
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js" crossorigin="anonymous"></script>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
 
   <style>
-    body { margin: 0; background: #000; font-family: sans-serif; color: white; height: 100vh; overflow: hidden; position: fixed; width: 100%; }
-    #video-container { position: relative; width: 100vw; height: 100vh; background: #000; }
+    body { margin: 0; background: #000; font-family: sans-serif; color: white; height: 100vh; width: 100%; position: fixed; overflow: hidden; }
+    #video-container { position: relative; width: 100vw; height: 100vh; }
     video, canvas { position: absolute; top:0; left:0; width: 100%; height: 100%; object-fit: cover; }
+
+    /* Fix: Mirroring only if we ever go back to selfie */
     .mirrored { transform: scaleX(-1); }
 
-    /* Startup Overlay to enable Voice */
-    #start-overlay { position: fixed; top:0; left:0; width:100%; height:100%; background: rgba(0,0,0,0.9); z-index: 1000; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; }
-    .start-btn { background: #00FFAA; color: black; padding: 20px 40px; border-radius: 50px; font-weight: bold; border: none; font-size: 18px; cursor: pointer; }
+    #start-overlay { position: fixed; top:0; left:0; width:100%; height:100%; background: #000; z-index: 1000; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+    .start-btn { background: #00FFAA; color: black; padding: 20px 50px; border-radius: 50px; font-weight: bold; border: none; font-size: 20px; cursor: pointer; box-shadow: 0 0 20px rgba(0,255,170,0.4); }
 
-    .top-bar { position: absolute; top: 20px; left: 0; width: 100%; display: flex; justify-content: space-between; padding: 0 15px; box-sizing: border-box; z-index: 100; gap: 8px; }
-    .glass-btn { background: rgba(0, 0, 0, 0.7); border: 1px solid rgba(0, 255, 170, 0.5); color: white; padding: 10px; border-radius: 8px; font-weight: bold; backdrop-filter: blur(5px); font-size: 11px; }
-    .height-box { display: flex; align-items: center; gap: 8px; background: rgba(0,0,0,0.7); padding: 5px 10px; border-radius: 8px; border: 1px solid #444; backdrop-filter: blur(5px); }
-    .height-box input { width: 45px; background: transparent; border: none; color: #00FFAA; font-weight: bold; font-size: 16px; outline: none; }
-
-    #status-overlay { position: absolute; top: 80px; left: 50%; transform: translateX(-50%); background: rgba(0,255,170,0.2); padding: 8px 20px; border-radius: 20px; border: 1px solid #00FFAA; color: #00FFAA; font-size: 11px; font-weight: bold; z-index: 90; text-align: center; }
-
-    #measurements-overlay { position: absolute; bottom: 120px; left: 15px; right: 15px; background: rgba(0,0,0,0.8); border-radius: 15px; padding: 15px; display: grid; grid-template-columns: 1fr 1fr; gap: 10px; backdrop-filter: blur(10px); border: 1px solid #333; pointer-events: none; }
-    .m-item { display: flex; flex-direction: column; }
-    .m-label { font-size: 9px; color: #aaa; text-transform: uppercase; margin-bottom: 2px; }
-    .m-val { font-size: 20px; color: #00FFAA; font-weight: bold; font-family: monospace; }
-    .unit-text { font-size: 10px; margin-left: 4px; color: #666; }
-
-    .capture-ring { position: absolute; bottom: 30px; left: 50%; transform: translateX(-50%); width: 72px; height: 72px; border-radius: 50%; border: 4px solid #fff; display: flex; align-items: center; justify-content: center; background: transparent; cursor: pointer; z-index: 100; }
-    .capture-inner { width: 58px; height: 58px; border-radius: 50%; background: #00FFAA; }
+    .top-bar { position: absolute; top: 20px; left: 0; width: 100%; display: flex; justify-content: space-between; padding: 0 15px; box-sizing: border-box; z-index: 100; pointer-events: none; }
+    .controls-wrap { display: flex; gap: 10px; pointer-events: auto; }
     
-    #resume-btn { position: absolute; bottom: 45px; right: 20px; background: #ffcc00; color: #000; padding: 12px 24px; border-radius: 25px; font-weight: bold; border: none; display: none; z-index: 101; box-shadow: 0 4px 15px rgba(0,0,0,0.5); }
+    .glass-box { background: rgba(0, 0, 0, 0.8); border: 1px solid #444; color: white; padding: 10px; border-radius: 12px; backdrop-filter: blur(8px); display: flex; align-items: center; gap: 8px; }
+    .glass-box input { width: 50px; background: transparent; border: none; color: #00FFAA; font-weight: bold; font-size: 18px; outline: none; }
+    .glass-btn { background: rgba(0, 0, 0, 0.8); border: 1px solid #444; color: white; padding: 10px 15px; border-radius: 12px; font-weight: bold; font-size: 12px; cursor: pointer; }
+
+    #status-overlay { position: absolute; top: 90px; left: 50%; transform: translateX(-50%); background: rgba(0,255,170,0.15); padding: 8px 25px; border-radius: 25px; border: 1px solid #00FFAA; color: #00FFAA; font-size: 12px; font-weight: bold; z-index: 90; letter-spacing: 1px; }
+
+    #measurements-overlay { position: absolute; bottom: 130px; left: 15px; right: 15px; background: rgba(0,0,0,0.85); border-radius: 20px; padding: 20px; display: grid; grid-template-columns: 1fr 1fr; gap: 15px; border: 1px solid #333; pointer-events: none; }
+    .m-item { display: flex; flex-direction: column; }
+    .m-label { font-size: 10px; color: #888; text-transform: uppercase; margin-bottom: 4px; letter-spacing: 1px; }
+    .m-val { font-size: 22px; color: #00FFAA; font-weight: bold; font-family: monospace; }
+    .unit-txt { font-size: 12px; color: #555; margin-left: 5px; }
+
+    .capture-ring { position: absolute; bottom: 35px; left: 50%; transform: translateX(-50%); width: 75px; height: 75px; border-radius: 50%; border: 4px solid #fff; display: flex; align-items: center; justify-content: center; background: transparent; cursor: pointer; z-index: 100; }
+    .capture-inner { width: 60px; height: 60px; border-radius: 50%; background: #00FFAA; }
+    
+    #resume-btn { position: absolute; bottom: 50px; right: 20px; background: #ffcc00; color: #000; padding: 14px 28px; border-radius: 30px; font-weight: bold; border: none; display: none; z-index: 101; box-shadow: 0 4px 15px rgba(0,0,0,0.5); }
   </style>
 </head>
 <body>
 
 <div id="start-overlay">
-    <h2 style="color: #00FFAA;">AI Clothing Assistant</h2>
-    <p style="padding: 0 20px; color: #ccc;">Enable your camera and voice instructions</p>
-    <button class="start-btn" onclick="initApp()">START SCANNER</button>
+    <h1 style="color: #00FFAA; margin-bottom: 10px;">Body Scan AI</h1>
+    <p style="color: #888; margin-bottom: 30px;">Default Unit: Inches</p>
+    <button class="start-btn" onclick="initApp()">START CAMERA</button>
 </div>
 
 <div id="video-container">
@@ -51,28 +54,29 @@
     <canvas id="output_canvas"></canvas>
 
     <div class="top-bar">
-        <div class="height-box">
-            <input type="number" id="userHeight" value="165">
-            <span id="height-unit-text" style="font-size: 10px; color: #ccc; font-weight: bold;">CM</span>
+        <div class="glass-box">
+            <span style="font-size: 10px; color: #888;">HT:</span>
+            <input type="number" id="userHeight" value="65" step="0.5">
+            <span style="font-size: 11px; color: #888;">IN</span>
         </div>
-        <div style="display: flex; gap: 8px;">
-            <button class="glass-btn" onclick="toggleUnits()" id="unit-toggle-btn">IN / CM</button>
+        <div class="controls-wrap">
+            <button class="glass-btn" onclick="toggleUnits()" id="unit-btn">IN</button>
             <button class="glass-btn" onclick="toggleCamera()">🔄 FLIP</button>
         </div>
     </div>
 
-    <div id="status-overlay">WAITING FOR START...</div>
+    <div id="status-overlay">WAITING...</div>
 
     <div id="measurements-overlay">
-        <div class="m-item"><span class="m-label">Shoulders</span><span><span id="out-shoulder" class="m-val">--</span><span class="unit-text">cm</span></span></div>
-        <div class="m-item"><span class="m-label">Bust</span><span><span id="out-bust" class="m-val">--</span><span class="unit-text">cm</span></span></div>
-        <div class="m-item"><span class="m-label">Waist</span><span><span id="out-waist" class="m-val">--</span><span class="unit-text">cm</span></span></div>
-        <div class="m-item"><span class="m-label">Hips</span><span><span id="out-hips" class="m-val">--</span><span class="unit-text">cm</span></span></div>
+        <div class="m-item"><span class="m-label">Shoulders</span><span><span id="out-sh" class="m-val">--</span><span class="unit-txt">in</span></span></div>
+        <div class="m-item"><span class="m-label">Bust</span><span><span id="out-bu" class="m-val">--</span><span class="unit-txt">in</span></span></div>
+        <div class="m-item"><span class="m-label">Waist</span><span><span id="out-wa" class="m-val">--</span><span class="unit-txt">in</span></span></div>
+        <div class="m-item"><span class="m-label">Hips</span><span><span id="out-hi" class="m-val">--</span><span class="unit-txt">in</span></span></div>
     </div>
 
-    <button id="resume-btn" onclick="resumeScanning()">RESUME</button>
+    <button id="resume-btn" onclick="resumeScan()">RESUME</button>
 
-    <div class="capture-ring" id="capture-btn" onclick="captureData()">
+    <div class="capture-ring" id="capture-btn" onclick="takeSnapshot()">
         <div class="capture-inner"></div>
     </div>
 </div>
