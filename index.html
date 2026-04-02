@@ -3,54 +3,82 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Women's Clothing Scanner</title>
+  <title>Women's Clothing Scanner Pro</title>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
 
   <style>
-    body { margin: 0; background: #111; font-family: sans-serif; color: white; display: flex; }
-    #container { position: relative; width: 70vw; height: 100vh; background: #000; overflow: hidden; }
-    video, canvas { position: absolute; top:0; left:0; width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); }
+    body { margin: 0; background: #0a0a0a; font-family: 'Segoe UI', sans-serif; color: white; display: flex; height: 100vh; overflow: hidden; }
     
-    #sidebar { width: 30vw; padding: 25px; background: #1a1a1a; box-sizing: border-box; border-left: 2px solid #00FFAA; }
-    .input-group { margin-bottom: 20px; }
-    input { width: 100%; padding: 10px; border-radius: 5px; border: none; font-size: 16px; margin-top: 5px; }
+    #container { 
+      position: relative; 
+      flex-grow: 1; 
+      background: #000; 
+      display: flex; 
+      align-items: center; 
+      justify-content: center;
+      padding: 20px;
+    }
+    video, canvas { 
+      position: absolute; 
+      max-width: 95%; 
+      max-height: 95%; 
+      border-radius: 12px;
+      box-shadow: 0 0 30px rgba(0,255,170,0.2);
+      object-fit: contain; 
+    }
     
-    .stats { background: #222; padding: 15px; border-radius: 8px; margin-bottom: 20px; }
-    .m-row { display: flex; justify-content: space-between; margin: 10px 0; border-bottom: 1px solid #333; padding-bottom: 5px; }
-    .val { color: #00FFAA; font-weight: bold; font-size: 1.2em; }
+    /* Mirror effect only for front camera - handled in JS now */
+    .mirrored { transform: scaleX(-1); }
+
+    #sidebar { width: 350px; padding: 30px; background: #151515; border-left: 1px solid #333; overflow-y: auto; z-index: 10; }
+    .input-group { margin-bottom: 25px; }
+    label { font-size: 11px; color: #888; text-transform: uppercase; letter-spacing: 1.5px; font-weight: bold; }
+    input { width: 100%; padding: 12px; background: #222; border: 1px solid #444; border-radius: 6px; color: #00FFAA; font-size: 18px; margin-top: 8px; box-sizing: border-box; }
     
-    button { width: 100%; padding: 15px; background: #00FFAA; color: #000; border: none; font-weight: bold; cursor: pointer; border-radius: 5px; }
-    button:hover { background: #00e699; }
+    .stats { background: #1e1e1e; padding: 20px; border-radius: 12px; margin-bottom: 25px; border: 1px solid #222; }
+    .m-row { display: flex; justify-content: space-between; align-items: center; margin: 12px 0; }
+    .label-text { color: #ccc; font-size: 15px; }
+    .val { color: #00FFAA; font-weight: 700; font-size: 1.3em; font-family: monospace; }
+    
+    .btn-primary { width: 100%; padding: 16px; background: #00FFAA; color: #000; border: none; font-weight: bold; cursor: pointer; border-radius: 8px; transition: 0.3s; font-size: 16px; margin-bottom: 10px; }
+    .btn-secondary { width: 100%; padding: 12px; background: #333; color: #fff; border: 1px solid #444; font-weight: bold; cursor: pointer; border-radius: 8px; transition: 0.2s; font-size: 14px; }
+    button:hover { opacity: 0.9; transform: translateY(-1px); }
+    
+    .tip { font-size: 12px; color: #666; line-height: 1.5; margin-top: 20px; background: #111; padding: 10px; border-radius: 4px; }
   </style>
 </head>
 <body>
 
 <div id="container">
-  <video id="input_video"></video>
+  <video id="input_video" autoplay playsinline></video>
   <canvas id="output_canvas"></canvas>
 </div>
 
 <div id="sidebar">
-  <h2>Scanner Settings</h2>
+  <h2 style="margin-top:0; color: #00FFAA; letter-spacing: -1px;">AI Body Scanner</h2>
+  
   <div class="input-group">
-    <label>Your Height (cm):</label>
+    <label>User Height (cm)</label>
     <input type="number" id="userHeight" value="165" oninput="updateHeight()">
   </div>
 
   <div class="stats">
-    <h3>Estimated Girth (cm)</h3>
-    <div class="m-row"><span>Shoulder Width:</span> <span id="out-shoulder" class="val">--</span></div>
-    <div class="m-row"><span>Bust/Chest:</span> <span id="out-bust" class="val">--</span></div>
-    <div class="m-row"><span>Waist:</span> <span id="out-waist" class="val">--</span></div>
-    <div class="m-row"><span>Hips:</span> <span id="out-hips" class="val">--</span></div>
+    <div class="m-row"><span class="label-text">Shoulders</span> <span id="out-shoulder" class="val">--</span></div>
+    <div class="m-row"><span class="label-text">Bust Girth</span> <span id="out-bust" class="val">--</span></div>
+    <div class="m-row"><span class="label-text">Waist Girth</span> <span id="out-waist" class="val">--</span></div>
+    <div class="m-row"><span class="label-text">Hip Girth</span> <span id="out-hips" class="val">--</span></div>
   </div>
 
-  <button onclick="copyToClipboard()">Copy for Google Sheets</button>
-  <p style="font-size: 12px; color: #888; margin-top: 15px;">
-    *Stand 2-3 meters away. Wear fitted clothing for accuracy.
-  </p>
+  <button class="btn-primary" onclick="copyToClipboard()">Copy for Google Sheets</button>
+  <button class="btn-secondary" onclick="toggleCamera()">🔄 Switch Camera</button>
+  
+  <div class="tip">
+    <strong>Scanner Tips:</strong><br>
+    • Stand so your full body is visible.<br>
+    • If using the <strong>Back Camera</strong>, you can use the 0.5x Ultra-Wide lens for smaller rooms.
+  </div>
 </div>
 
 <script src="script.js"></script>
