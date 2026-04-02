@@ -3,34 +3,46 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Body Measurement Scanner</title>
+  <title>MediaPipe Pose Demo</title>
 
-  <!-- CSS -->
-  <link rel="stylesheet" href="style.css" />
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/vision_bundle.js"></script>
 
-  <!-- Mediapipe -->
-  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils"></script>
+  <style>
+    body { margin: 0; background: #111; display: flex; justify-content: center; }
+    #videoElement {
+      transform: scaleX(-1);
+      width: 100vw;
+      height: auto;
+    }
+    canvas {
+      position: absolute;
+      left: 0;
+      top: 0;
+      width: 100vw;
+      height: auto;
+      pointer-events: none;
+      transform: scaleX(-1);
+    }
+    #errorBox {
+      position: absolute;
+      top: 20px;
+      color: #ff4444;
+      font-size: 22px;
+      font-family: sans-serif;
+      background: rgba(0,0,0,0.6);
+      padding: 10px 14px;
+      border-radius: 6px;
+      display: none;
+    }
+  </style>
 </head>
-
 <body>
-  <header>
-    <h2>📏 Body Measurement Scanner</h2>
-    <p class="brand">Brand Placeholder</p>
-  </header>
 
-  <main>
-    <video id="video" autoplay playsinline></video>
-    <canvas id="canvas"></canvas>
+  <div id="errorBox"></div>
 
-    <h3>Measurements</h3>
-    <div id="measurements">Loading...</div>
+  <video id="videoElement" autoplay playsinline></video>
+  <canvas id="outputCanvas"></canvas>
 
-    <button id="copyBtn">Copy to Clipboard</button>
-  </main>
-
-  <!-- JS -->
   <script src="script.js"></script>
 </body>
 </html>
