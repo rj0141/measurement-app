@@ -1,95 +1,115 @@
-const video = document.getElementById("video");
-const canvas = document.getElementById("canvas");
+const video = document.getElementById("videoElement");
+const canvas = document.getElementById("outputCanvas");
 const ctx = canvas.getContext("2d");
-const mBox = document.getElementById("measurements");
-const copyBtn = document.getElementById("copyBtn");
+const errorBox = document.getElementById("errorBox");
 
-// Start camera
-async function startCamera() {
-  try {
-    const stream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: "user", width: 720, height: 1280 }
-    });
-    video.srcObject = stream;
-  } catch (err) {
-    mBox.innerHTML = "Camera blocked or unavailable.";
-  }
+let poseLandmarker;
+let running = false;
+
+// timeout logic
+let lastDetectedTime = Date.now();
+const TIMEOUT_MS = 30000; // 30 seconds
+
+async function initPose() {
+  const vision = await FilesetResolver.forVisionTasks(
+    "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm"
+  );
+
+  poseLandmarker = await PoseLandmarker.createFromOptions(vision, {
+    baseOptions: {
+      modelAssetPath:
+        "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_heavy/float16/1/pose_landmarker_heavy.task",
+    },
+    runningMode: "VIDEO",
+    numPoses: 1,
+  });
+
+  startCamera();
 }
 
-startCamera();
+async function startCamera() {
+  const stream = await navigator.mediaDevices.getUserMedia({
+    video: { facingMode: "user" },
+  });
+  video.srcObject = stream;
 
-// Stable Mediapipe version
-const pose = new pose.Pose({
-  locateFile: (file) =>
-    `https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.5/${file}`,
-});
+  video.onloadedmetadata = () => {
+    video.play();
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    running = true;
+    detectPose();
+  };
+}
 
-pose.setOptions({
-  modelComplexity: 1,
-  smoothLandmarks: true,
-  minDetectionConfidence: 0.6,
-  minTrackingConfidence: 0.6,
-});
+async function detectPose() {
+  if (!running) return;
 
-pose.onResults(onPoseResults);
-
-// Camera
-const camera = new Camera.Camera(video, {
-  onFrame: async () => {
-    await pose.send({ image: video });
-  },
-  width: 720,
-  height: 1280,
-});
-camera.start();
-
-// Main function
-function onPoseResults(results) {
-  canvas.width = video.videoWidth;
-  canvas.height = video.videoHeight;
+  const nowTs = performance.now();
+  const result = await poseLandmarker.detectForVideo(video, nowTs);
 
   ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-  // Mirror video
-  ctx.save();
-  ctx.scale(-1, 1);
-  ctx.translate(-canvas.width, 0);
-  ctx.drawImage(results.image, 0, 0, canvas.width, canvas.height);
-  ctx.restore();
-
-  if (!results.poseLandmarks) {
-    mBox.innerHTML = "Loading...";
+  // No landmarks detected?
+  if (!result.landmarks || result.landmarks.length === 0) {
+    checkTimeout();
+    requestAnimationFrame(detectPose);
     return;
   }
 
-  const L = results.poseLandmarks;
+  // Reset timeout timer when pose detected
+  lastDetectedTime = Date.now();
+  hideError();
 
-  function dist(a, b) {
-    return Math.sqrt(
-      (a.x - b.x) * (a.x - b.x) +
-      (a.y - b.y) * (a.y - b.y) +
-      (a.z - b.z) * (a.z - b.z)
+  // Use first pose
+  const lm = result.landmarks[0];
+
+  drawPartialLandmarks(lm);
+  calculatePartialMeasurements(lm);
+
+  requestAnimationFrame(detectPose);
+}
+
+function drawPartialLandmarks(landmarks) {
+  ctx.fillStyle = "#00FF00";
+
+  landmarks.forEach((lm) => {
+    ctx.beginPath();
+    ctx.arc(lm.x * canvas.width, lm.y * canvas.height, 5, 0, 2 * Math.PI);
+    ctx.fill();
+  });
+}
+
+function calculatePartialMeasurements(lm) {
+  // Sample partial measurement: shoulder width
+  if (lm[11] && lm[12]) {
+    const shoulderDist = Math.hypot(
+      (lm[11].x - lm[12].x) * canvas.width,
+      (lm[11].y - lm[12].y) * canvas.height
     );
+    console.log("Shoulder Width (px):", shoulderDist);
   }
 
-  const measurements = {
-    "Shoulder Width": dist(L[11], L[12]).toFixed(3),
-    "Hip Width": dist(L[23], L[24]).toFixed(3),
-    "Torso Length": dist(L[11], L[23]).toFixed(3),
-    "Arm Length": dist(L[11], L[15]).toFixed(3),
-    "Leg Length": dist(L[23], L[31]).toFixed(3),
-  };
-
-  mBox.innerHTML = Object.entries(measurements)
-    .map(([k, v]) => `<b>${k}:</b> ${v}`)
-    .join("<br>");
-
-  copyBtn.onclick = () => {
-    navigator.clipboard.writeText(
-      Object.entries(measurements)
-        .map(([k, v]) => `${k}: ${v}`)
-        .join("\n")
-    );
-    alert("Copied!");
-  };
+  // Add more body parts as needed
 }
+
+// Check timeout if no human detected
+function checkTimeout() {
+  const now = Date.now();
+
+  if (now - lastDetectedTime > TIMEOUT_MS) {
+    showError("No person detected for 30 seconds. Please adjust camera and retry.");
+    running = false;
+  }
+}
+
+function showError(msg) {
+  errorBox.style.display = "block";
+  errorBox.innerText = msg;
+}
+
+function hideError() {
+  errorBox.style.display = "none";
+}
+
+initPose();
