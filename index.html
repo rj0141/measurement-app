@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Body Measurement Scanner</title>
+
+  <!-- Load Mediapipe Pose + Utils (NO modules, NO exports) -->
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
+
+  <style>
+    body {
+      margin: 0;
+      overflow: hidden;
+      background: #000;
+      font-family: Arial, sans-serif;
+    }
+
+    #videoElement {
+      width: 100vw;
+      height: auto;
+      transform: scaleX(-1); /* mirror for selfie view */
+    }
+
+    #outputCanvas {
+      position: absolute;
+      left: 0;
+      top: 0;
+      width: 100vw;
+      height: auto;
+      pointer-events: none;
+      transform: scaleX(-1);
+    }
+
+    #errorBox {
+      position: absolute;
+      top: 15px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(0,0,0,0.6);
+      color: #ff4c4c;
+      font-size: 20px;
+      padding: 10px 15px;
+      border-radius: 6px;
+      display: none;
+    }
+  </style>
+</head>
+
+<body>
+  <div id="errorBox"></div>
+
+  <video id="videoElement" autoplay playsinline></video>
+  <canvas id="outputCanvas"></canvas>
+
+  <script src="script.js"></script>
+</body>
+</html>
