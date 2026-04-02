@@ -10,50 +10,53 @@
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
 
   <style>
-    body {
-      margin: 0;
-      overflow: hidden;
-      background: #000;
-      font-family: Arial, sans-serif;
-    }
-
-    #videoElement {
-      width: 100vw;
-      height: auto;
-      transform: scaleX(-1); /* mirror for selfie view */
-    }
-
-    #outputCanvas {
+    body { margin: 0; background: #000; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; color: white; }
+    #videoElement { width: 100vw; height: auto; transform: scaleX(-1); }
+    #outputCanvas { position: absolute; left: 0; top: 0; width: 100vw; height: auto; transform: scaleX(-1); pointer-events: none; }
+    
+    /* Measurement Overlay */
+    #measurementsPanel {
       position: absolute;
-      left: 0;
-      top: 0;
-      width: 100vw;
-      height: auto;
-      pointer-events: none;
-      transform: scaleX(-1);
+      top: 20px;
+      right: 20px;
+      background: rgba(0, 0, 0, 0.8);
+      padding: 20px;
+      border-radius: 12px;
+      border: 1px solid #00FFAA;
+      width: 220px;
     }
-
-    #errorBox {
-      position: absolute;
-      top: 15px;
-      left: 50%;
-      transform: translateX(-50%);
-      background: rgba(0,0,0,0.6);
-      color: #ff4c4c;
-      font-size: 20px;
-      padding: 10px 15px;
+    .m-item { display: flex; justify-content: space-between; margin-bottom: 10px; font-size: 18px; }
+    .m-label { color: #aaa; }
+    .m-val { color: #00FFAA; font-weight: bold; }
+    
+    button {
+      width: 100%;
+      padding: 12px;
+      background: #00FFAA;
+      border: none;
       border-radius: 6px;
-      display: none;
-      z-index: 10;
+      color: black;
+      font-weight: bold;
+      cursor: pointer;
+      margin-top: 10px;
     }
+    button:active { opacity: 0.8; }
+    #errorBox { position: absolute; top: 10px; left: 50%; transform: translateX(-50%); color: #ff4c4c; background: rgba(0,0,0,0.6); padding: 10px; border-radius: 5px; display: none; }
   </style>
 </head>
-
 <body>
   <div id="errorBox"></div>
-
   <video id="videoElement" autoplay playsinline></video>
   <canvas id="outputCanvas"></canvas>
+
+  <div id="measurementsPanel">
+    <h3 style="margin-top:0">Body Stats (cm)</h3>
+    <div class="m-item"><span class="m-label">Shoulders:</span> <span id="val-shoulders" class="m-val">--</span></div>
+    <div class="m-item"><span class="m-label">Chest:</span> <span id="val-chest" class="m-val">--</span></div>
+    <div class="m-item"><span class="m-label">Waist:</span> <span id="val-waist" class="m-val">--</span></div>
+    <div class="m-item"><span class="m-label">Hips:</span> <span id="val-hips" class="m-val">--</span></div>
+    <button onclick="copyToClipboard()">Copy for Google Sheets</button>
+  </div>
 
   <script src="script.js"></script>
 </body>
