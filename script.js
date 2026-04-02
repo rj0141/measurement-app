@@ -1,51 +1,65 @@
-// --- GLOBAL ELEMENTS ---
-const setupHeight = document.getElementById('setupHeight');
-const activateBtn = document.getElementById('activate-btn');
-const overlay = document.getElementById('start-overlay');
-const userHeightInput = document.getElementById('userHeight');
-const video = document.getElementById('input_video');
-const canvas = document.getElementById('output_canvas');
-const ctx = canvas.getContext('2d');
-const statusText = document.getElementById('status-overlay');
-
-// --- APP STATE ---
-let isFrozen = false;
-let currentFacing = 'environment'; 
-let stream = null;
-let currentUnit = 'inch';
-let pose = null;
-
-// NEW: Scanning State
-let scanPhase = "FRONT"; // FRONT -> SIDE -> DONE
+// Global State
+let scanPhase = "FRONT"; 
 let frontWidths = { sh: 0, bu: 0, wa: 0, hi: 0 };
 let sideWidths = { sh: 0, bu: 0, wa: 0, hi: 0 };
-let pixelScaleFactor = 0; // Inches per Pixel
+let isFrozen = false;
+let currentFacing = 'environment';
+let stream = null;
+let pose = null;
 
-// --- 1. MANDATORY HEIGHT VALIDATION ---
+// 1. THE RELIABLE VALIDATOR
 function validateHeight() {
+    const setupHeight = document.getElementById('setupHeight');
+    const activateBtn = document.getElementById('activate-btn');
+    
+    if (!setupHeight || !activateBtn) return;
+
     const val = parseFloat(setupHeight.value);
+    
     if (!isNaN(val) && val > 0) {
+        // Force the button to turn on
         activateBtn.disabled = false;
-        activateBtn.style.background = "#00FFAA";
-        activateBtn.style.color = "black";
+        activateBtn.style.backgroundColor = "#00FFAA";
+        activateBtn.style.color = "#000000";
+        activateBtn.style.opacity = "1";
     } else {
         activateBtn.disabled = true;
-        activateBtn.style.background = "#333";
-        activateBtn.style.color = "#666";
+        activateBtn.style.backgroundColor = "#333333";
+        activateBtn.style.color = "#666666";
     }
 }
-// Force check every 500ms to catch mobile keyboard entries
-setInterval(validateHeight, 500);
 
-// --- 2. INITIALIZATION ---
-async function initApp() {
-    const val = parseFloat(setupHeight.value);
-    if (isNaN(val) || val <= 0) return;
-
-    userHeightInput.value = val;
-    overlay.style.display = 'none';
-    statusText.innerText = "LOADING AI...";
+// 2. WAIT FOR WINDOW LOAD
+window.onload = () => {
+    const setupHeight = document.getElementById('setupHeight');
     
+    // Attach listeners for every possible interaction
+    if (setupHeight) {
+        ['input', 'change', 'keyup', 'blur', 'focus'].forEach(ev => {
+            setupHeight.addEventListener(ev, validateHeight);
+        });
+    }
+
+    // Secondary backup: Check every half second
+    setInterval(validateHeight, 500);
+    
+    console.log("Scanner initialized and waiting for height...");
+};
+
+// 3. START APP
+async function initApp() {
+    const setupHeight = document.getElementById('setupHeight');
+    const userHeightDisplay = document.getElementById('userHeight');
+    const overlay = document.getElementById('start-overlay');
+    const statusText = document.getElementById('status-overlay');
+
+    if (!setupHeight.value || setupHeight.value <= 0) return;
+
+    // Sync values
+    userHeightDisplay.value = setupHeight.value;
+    overlay.style.display = 'none';
+    statusText.innerText = "INITIALIZING CAMERA...";
+
     pose = new Pose({
         locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`
     });
@@ -62,7 +76,11 @@ async function initApp() {
 }
 
 async function startCamera() {
+    const video = document.getElementById('input_video');
+    const statusText = document.getElementById('status-overlay');
+
     if (stream) stream.getTracks().forEach(t => t.stop());
+
     try {
         stream = await navigator.mediaDevices.getUserMedia({
             video: { facingMode: currentFacing, width: {ideal: 1280}, height: {ideal: 720} }
@@ -75,18 +93,25 @@ async function startCamera() {
         };
     } catch (e) {
         statusText.innerText = "❌ CAMERA ERROR";
+        alert("Camera failed to start. Please check permissions.");
     }
 }
 
-// --- 3. CORE LOGIC & MATH ---
+// 4. MEASUREMENT LOGIC (PIXEL-WIDTH BASED)
 async function renderLoop() {
     if (isFrozen || !pose) return;
+    const video = document.getElementById('input_video');
     try { await pose.send({ image: video }); } catch (err) {}
     requestAnimationFrame(renderLoop);
 }
 
 function onResults(results) {
     if (isFrozen) return;
+    const video = document.getElementById('input_video');
+    const canvas = document.getElementById('output_canvas');
+    const ctx = canvas.getContext('2d');
+    const statusText = document.getElementById('status-overlay');
+
     canvas.width = video.videoWidth;
     canvas.height = video.videoHeight;
     ctx.save();
@@ -94,87 +119,85 @@ function onResults(results) {
 
     if (results.poseLandmarks) {
         const lm = results.poseLandmarks;
-        processMeasurements(lm);
+        calculatePixelWidths(lm);
         drawConnectors(ctx, lm, POSE_CONNECTIONS, {color: '#00FFAA', lineWidth: 3});
         drawLandmarks(ctx, lm, {color: '#FFFFFF', radius: 2});
     } else {
-        statusText.innerText = "⚠️ STEP BACK";
+        statusText.innerText = "⚠️ STEP BACK - SHOW FULL BODY";
     }
     ctx.restore();
 }
 
-function processMeasurements(lm) {
-    const canvasW = canvas.width;
-    const canvasH = canvas.height;
+function calculatePixelWidths(lm) {
+    const canvasW = document.getElementById('output_canvas').width;
+    const canvasH = document.getElementById('output_canvas').height;
+    const userHVal = parseFloat(document.getElementById('userHeight').value) || 65;
 
-    // SCALE: Use height only (Nose to Ankle)
+    // SCALE: Pixel height from Nose to Ankle
     const ankleY = (lm[27].y + lm[28].y) / 2;
     const pxHeight = Math.abs(ankleY - lm[0].y) * canvasH;
-    const userH = parseFloat(userHeightInput.value) || 65;
-    pixelScaleFactor = userH / pxHeight;
+    const pxScale = userHVal / pxHeight; 
 
-    // Calculate RAW pixel widths (Distance between Landmark Pairs)
+    // Measures distance between left and right markers directly (The "Actual" Pixel Width)
     const currentW = {
-        sh: Math.hypot(lm[12].x - lm[11].x, lm[12].y - lm[11].y) * canvasW,
-        bu: Math.hypot(lm[12].x - lm[11].x, lm[12].y - lm[11].y) * canvasW * 1.05, // Bust width reference
-        wa: Math.hypot(lm[24].x - lm[23].x, lm[24].y - lm[23].y) * canvasW * 0.9,  // Waist width reference
-        hi: Math.hypot(lm[24].x - lm[23].x, lm[24].y - lm[23].y) * canvasW
+        sh: Math.abs(lm[12].x - lm[11].x) * canvasW,
+        bu: Math.abs(lm[12].x - lm[11].x) * canvasW * 1.1, // Adjusted for chest volume
+        wa: Math.abs(lm[24].x - lm[23].x) * canvasW * 0.95,
+        hi: Math.abs(lm[24].x - lm[23].x) * canvasW
     };
 
     if (scanPhase === "FRONT") {
-        statusText.innerText = "✅ CAPTURE FRONT";
-        updateUI(currentW, true); // True = show raw front width
-    } else if (scanPhase === "SIDE") {
-        statusText.innerText = "✅ CAPTURE SIDE";
+        updateMeasurementUI(currentW, pxScale);
     }
 }
 
-function updateUI(widths, isLive) {
-    const div = currentUnit === 'inch' ? 1 : 1; // Scaling already handled by pixelScaleFactor
-    
-    document.getElementById('out-sh').innerText = (widths.sh * pixelScaleFactor).toFixed(1);
-    document.getElementById('out-bu').innerText = (widths.bu * pixelScaleFactor).toFixed(1);
-    document.getElementById('out-wa').innerText = (widths.wa * pixelScaleFactor).toFixed(1);
-    document.getElementById('out-hi').innerText = (widths.hi * pixelScaleFactor).toFixed(1);
+function updateMeasurementUI(widths, scale) {
+    document.getElementById('out-sh').innerText = (widths.sh * scale).toFixed(1);
+    document.getElementById('out-bu').innerText = (widths.bu * scale).toFixed(1);
+    document.getElementById('out-wa').innerText = (widths.wa * scale).toFixed(1);
+    document.getElementById('out-hi').innerText = (widths.hi * scale).toFixed(1);
 }
 
-// --- 4. PHASE NAVIGATION ---
+function speak(txt) {
+    if (!window.speechSynthesis) return;
+    window.speechSynthesis.cancel();
+    window.speechSynthesis.speak(new SpeechSynthesisUtterance(txt));
+}
+
+// 5. PHASE NAVIGATION (CAPTURE BUTTON CLICK)
 function takeSnapshot() {
-    const lm = lastLandmarks; // We would need a global 'lastLandmarks' but let's calculate on click
-    
     if (scanPhase === "FRONT") {
-        // LOCK FRONT WIDTHS
-        frontWidths = getWidthsFromCurrentFrame(); 
+        // Capture front widths in pixels
+        const scale = parseFloat(document.getElementById('userHeight').value) / (/* calc height here if needed */ 1000); 
+        frontWidths = {
+            sh: parseFloat(document.getElementById('out-sh').innerText),
+            bu: parseFloat(document.getElementById('out-bu').innerText),
+            wa: parseFloat(document.getElementById('out-wa').innerText),
+            hi: parseFloat(document.getElementById('out-hi').innerText)
+        };
+        
         scanPhase = "SIDE";
-        speak("Front captured. Now turn 90 degrees to your side and tap the button again.");
-        statusText.innerText = "READY FOR SIDE SCAN";
+        speak("Front captured. Now please turn ninety degrees to your side and tap again.");
+        document.getElementById('status-overlay').innerText = "TURN FOR SIDE SCAN";
     } else if (scanPhase === "SIDE") {
-        // LOCK SIDE DEPTHS
-        sideWidths = getWidthsFromCurrentFrame();
-        calculateFinalGirths();
+        sideWidths = {
+            sh: parseFloat(document.getElementById('out-sh').innerText),
+            bu: parseFloat(document.getElementById('out-bu').innerText),
+            wa: parseFloat(document.getElementById('out-wa').innerText),
+            hi: parseFloat(document.getElementById('out-hi').innerText)
+        };
+
+        // FINAL GIRTH CALCULATION (Perimeter of an Ellipse)
+        ["sh", "bu", "wa", "hi"].forEach(k => {
+            const a = frontWidths[k] / 2; // Semi-major
+            const b = sideWidths[k] / 2; // Semi-minor
+            // Ramanujan Approximation for Girth
+            const girth = Math.PI * (3*(a + b) - Math.sqrt((3*a + b) * (a + 3*b)));
+            document.getElementById('out-' + k).innerText = girth.toFixed(1);
+        });
+
         scanPhase = "DONE";
         isFrozen = true;
-        speak("Measurements complete.");
+        speak("Final measurements calculated. Ready to copy.");
     }
 }
-
-function getWidthsFromCurrentFrame() {
-    // Logic to pull the current pixel width values at the moment of the click
-    return {
-        sh: parseFloat(document.getElementById('out-sh').innerText) / pixelScaleFactor,
-        bu: parseFloat(document.getElementById('out-bu').innerText) / pixelScaleFactor,
-        wa: parseFloat(document.getElementById('out-wa').innerText) / pixelScaleFactor,
-        hi: parseFloat(document.getElementById('out-hi').innerText) / pixelScaleFactor
-    };
-}
-
-function calculateFinalGirths() {
-    // Ellipse perimeter formula: π * sqrt(2 * (a^2 + b^2)) where a and b are semi-axes
-    // Here a = FrontWidth/2 and b = SideWidth/2
-    ["sh", "bu", "wa", "hi"].forEach(key => {
-        const wf = frontWidths[key] * pixelScaleFactor;
-        const ws = sideWidths[key] * pixelScaleFactor;
-        
-        // Approximation: PI * (1.5(a+b) - sqrt(ab))
-        const a = wf / 2;
-        const b = ws
