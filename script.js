@@ -1,74 +1,89 @@
-const video = document.getElementById("videoElement");
-const canvas = document.getElementById("outputCanvas");
-const ctx = canvas.getContext("2d");
+const videoElement = document.getElementById('input_video');
+const canvasElement = document.getElementById('output_canvas');
+const canvasCtx = canvasElement.getContext('2d');
+const heightInput = document.getElementById('userHeight');
 
-// Ask user for height to calibrate the scale
-const USER_HEIGHT_CM = parseFloat(prompt("Please enter your height in cm (e.g. 165):", "165")) || 165;
+let userHeightCm = 165;
+let currentResults = { shoulder:0, bust:0, waist:0, hips:0 };
 
-let currentMeasurements = { shoulders: 0, chest: 0, waist: 0, hips: 0 };
+function updateHeight() {
+    userHeightCm = parseFloat(heightInput.value) || 165;
+}
 
-const pose = new window.Pose({
+// Multiplier to estimate circumference from front-view width
+// Industry average for standard body types is 2.3 - 2.4
+const CIRCUMFERENCE_FACTOR = 2.35;
+
+const pose = new Pose({
   locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`
 });
 
-pose.setOptions({ modelComplexity: 1, smoothLandmarks: true, selfieMode: true });
-pose.onResults(onResults);
-
-function getDistance(p1, p2) {
-  return Math.sqrt(Math.pow(p2.x - p1.x, 2) + Math.pow(p2.y - p1.y, 2));
-}
+pose.setOptions({
+  modelComplexity: 1,
+  smoothLandmarks: true,
+  enableSegmentation: false,
+  selfieMode: true
+});
 
 function onResults(results) {
-  canvas.width = video.videoWidth;
-  canvas.height = video.videoHeight;
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  canvasElement.width = videoElement.videoWidth;
+  canvasElement.height = videoElement.videoHeight;
+  canvasCtx.save();
+  canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
 
-  if (!results.poseLandmarks) return;
+  if (results.poseLandmarks) {
+    const lm = results.poseLandmarks;
 
-  const landmarks = results.poseLandmarks;
+    // 1. DYNAMIC CALIBRATION
+    // Measure from Nose (0) to Ankle (28) as a height reference
+    const pixelHeight = Math.abs(lm[28].y - lm[0].y);
+    const cmPerPixel = userHeightCm / (pixelHeight * canvasElement.height);
 
-  // 1. CALIBRATE SCALE
-  // Ratio = User Height / (Distance from Head to Ankle in pixels)
-  const pixelHeight = getDistance(landmarks[0], landmarks[28]); // Nose to Ankle
-  const cmPerPixel = USER_HEIGHT_CM / (pixelHeight * canvas.height); 
+    // 2. FEATURE IDENTIFICATION
+    // Shoulder Width (Points 11 & 12)
+    const shoulderPx = Math.hypot(lm[12].x - lm[11].x, lm[12].y - lm[11].y) * canvasElement.width;
+    const shoulderCm = shoulderPx * cmPerPixel;
 
-  // 2. CALCULATE MEASUREMENTS (Widths)
-  // Note: These are flat widths. For circumferences, a rough estimate is width * 2.2
-  const shoulderPx = getDistance(landmarks[11], landmarks[12]);
-  const hipPx = getDistance(landmarks[23], landmarks[24]);
-  
-  // Waist is roughly halfway between shoulders and hips
-  const waistY = (landmarks[11].y + landmarks[23].y) / 2;
-  const chestY = (landmarks[11].y * 0.7 + landmarks[23].y * 0.3);
+    // Hip Width (Points 23 & 24)
+    const hipPx = Math.hypot(lm[24].x - lm[23].x, lm[24].y - lm[23].y) * canvasElement.width;
+    const hipCm = hipPx * cmPerPixel;
 
-  currentMeasurements.shoulders = (shoulderPx * canvas.width * cmPerPixel).toFixed(1);
-  currentMeasurements.hips = (hipPx * canvas.width * cmPerPixel).toFixed(1);
-  currentMeasurements.waist = (currentMeasurements.hips * 0.85).toFixed(1); // Rough estimate for waist
-  currentMeasurements.chest = (currentMeasurements.shoulders * 0.95).toFixed(1);
+    // Bust and Waist Estimation based on Torso Proportions
+    // Chest/Bust is usually ~30% down the torso (Shoulder to Hip)
+    // Waist is usually ~65% down the torso
+    const chestWidthPx = shoulderPx * 0.92; // Refined assumption for female bust width vs shoulders
+    const waistWidthPx = hipPx * 0.82;     // Refined assumption for natural waist taper
 
-  // 3. UPDATE UI
-  document.getElementById('val-shoulders').innerText = currentMeasurements.shoulders;
-  document.getElementById('val-chest').innerText = currentMeasurements.chest;
-  document.getElementById('val-waist').innerText = currentMeasurements.waist;
-  document.getElementById('val-hips').innerText = currentMeasurements.hips;
+    // 3. CALCULATE GIRTH
+    currentResults.shoulder = shoulderCm.toFixed(1);
+    currentResults.bust = (chestWidthPx * cmPerPixel * CIRCUMFERENCE_FACTOR).toFixed(1);
+    currentResults.waist = (waistWidthPx * cmPerPixel * CIRCUMFERENCE_FACTOR).toFixed(1);
+    currentResults.hips = (hipCm * CIRCUMFERENCE_FACTOR).toFixed(1);
 
-  // 4. DRAW
-  window.drawConnectors(ctx, landmarks, window.POSE_CONNECTIONS, {color: '#00FFAA'});
-  window.drawLandmarks(ctx, landmarks, {color: '#FFDD55', radius: 4});
+    // Update UI
+    document.getElementById('out-shoulder').innerText = currentResults.shoulder;
+    document.getElementById('out-bust').innerText = currentResults.bust;
+    document.getElementById('out-waist').innerText = currentResults.waist;
+    document.getElementById('out-hips').innerText = currentResults.hips;
+
+    // Draw Visuals
+    drawConnectors(canvasCtx, results.poseLandmarks, POSE_CONNECTIONS, {color: '#00FFAA', lineWidth: 2});
+    drawLandmarks(canvasCtx, results.poseLandmarks, {color: '#FFDD55', radius: 3});
+  }
+  canvasCtx.restore();
 }
 
-const camera = new window.Camera(video, {
-  onFrame: async () => { await pose.send({image: video}); },
+pose.onResults(onResults);
+
+const camera = new Camera(videoElement, {
+  onFrame: async () => { await pose.send({image: videoElement}); },
   width: 1280, height: 720
 });
 camera.start();
 
 function copyToClipboard() {
-  const date = new Date().toLocaleDateString();
-  // Tab-separated format for Google Sheets
-  const text = `${date}\t${currentMeasurements.shoulders}\t${currentMeasurements.chest}\t${currentMeasurements.waist}\t${currentMeasurements.hips}`;
-  
-  navigator.clipboard.writeText(text).then(() => {
-    alert("Copied! Paste this directly into a Google Sheet row.");
-  });
+    const data = `${new Date().toLocaleDateString()}\t${currentResults.shoulder}\t${currentResults.bust}\t${currentResults.waist}\t${currentResults.hips}`;
+    navigator.clipboard.writeText(data).then(() => {
+        alert("Copied to clipboard! Ready to paste into Google Sheets.");
+    });
 }
