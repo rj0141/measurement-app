@@ -19,7 +19,7 @@ startCamera();
 // Initialize Mediapipe Pose
 const pose = new Pose.Pose({
   locateFile: (file) =>
-    `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`,
+    `https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.4.1646424915/${file}`,
 });
 
 pose.setOptions({
