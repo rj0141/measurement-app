@@ -1,11 +1,11 @@
+const setupHeight = document.getElementById('setupHeight');
+const activateBtn = document.getElementById('activate-btn');
+const overlay = document.getElementById('start-overlay');
+const userHeight = document.getElementById('userHeight');
 const video = document.getElementById('input_video');
 const canvas = document.getElementById('output_canvas');
 const ctx = canvas.getContext('2d');
 const statusText = document.getElementById('status-overlay');
-const userHeight = document.getElementById('userHeight');
-const setupHeight = document.getElementById('setupHeight');
-const activateBtn = document.getElementById('activate-btn');
-const overlay = document.getElementById('start-overlay');
 
 let isFrozen = false;
 let currentFacing = 'environment'; 
@@ -13,24 +13,24 @@ let stream = null;
 let currentUnit = 'inch';
 let pose = null;
 
-// NEW: More robust validation
+// The "Golden" validation function
 function validateHeight() {
     const val = parseFloat(setupHeight.value);
     if (!isNaN(val) && val > 0) {
         activateBtn.disabled = false;
         activateBtn.style.background = "#00FFAA";
         activateBtn.style.color = "black";
+        activateBtn.style.cursor = "pointer";
     } else {
         activateBtn.disabled = true;
         activateBtn.style.background = "#333";
         activateBtn.style.color = "#666";
+        activateBtn.style.cursor = "not-allowed";
     }
 }
 
-// Add listeners to ensure it captures every keystroke
-setupHeight.addEventListener('input', validateHeight);
-setupHeight.addEventListener('change', validateHeight);
-setupHeight.addEventListener('keyup', validateHeight);
+// Fallback: Check every 500ms in case events fail to fire on mobile
+setInterval(validateHeight, 500);
 
 function speak(txt) {
     if (!window.speechSynthesis) return;
@@ -42,10 +42,7 @@ function speak(txt) {
 
 async function initApp() {
     const val = parseFloat(setupHeight.value);
-    if (isNaN(val) || val <= 0) {
-        alert("Please enter a valid height first.");
-        return;
-    }
+    if (isNaN(val) || val <= 0) return;
 
     userHeight.value = val;
     overlay.style.display = 'none';
@@ -78,12 +75,11 @@ async function startCamera() {
             video.classList[isFront ? 'add' : 'remove']('mirrored');
             canvas.classList[isFront ? 'add' : 'remove']('mirrored');
             statusText.innerText = "AI ONLINE";
-            speak("Ready. Stand roughly seven feet back so I can see your full body.");
+            speak("Ready. Stand back seven feet.");
             requestAnimationFrame(renderLoop);
         };
     } catch (e) {
         statusText.innerText = "❌ CAMERA ERROR";
-        console.error(e);
     }
 }
 
@@ -116,7 +112,6 @@ function onResults(results) {
 function updateNumbers(lm) {
     const rawH = parseFloat(userHeight.value) || 0;
     const heightCm = currentUnit === 'inch' ? rawH * 2.54 : rawH;
-    
     const ankleY = (lm[27].y + lm[28].y) / 2;
     const pxH = Math.abs(ankleY - lm[0].y);
     const cmPerPx = heightCm / (pxH * canvas.height);
@@ -136,7 +131,7 @@ function updateNumbers(lm) {
 function takeSnapshot() {
     if (!pose) return;
     isFrozen = true;
-    speak("Captured. Copied to clipboard.");
+    speak("Captured.");
     
     const sh = document.getElementById('out-sh').innerText;
     const bu = document.getElementById('out-bu').innerText;
