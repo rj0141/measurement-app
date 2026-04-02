@@ -1,115 +1,126 @@
+// DOM elements
 const video = document.getElementById("videoElement");
 const canvas = document.getElementById("outputCanvas");
 const ctx = canvas.getContext("2d");
-const errorBox = document.getElementById("errorBox");
+const msg = document.getElementById("messageBox");
+const retryBtn = document.getElementById("retryBtn");
 
-let poseLandmarker;
-let running = false;
+// Timeout logic
+let lastDetected = Date.now();
+const TIMEOUT = 30000; // 30 sec
 
-// timeout logic
-let lastDetectedTime = Date.now();
-const TIMEOUT_MS = 30000; // 30 seconds
+// Voice instructions
+function speak(text) {
+  let v = new SpeechSynthesisUtterance(text);
+  v.rate = 1.1;
+  speechSynthesis.speak(v);
+}
 
-async function initPose() {
-  const vision = await FilesetResolver.forVisionTasks(
-    "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm"
-  );
+// --- POSE SETUP ---
+const pose = new Pose.Pose({
+  locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${f}`
+});
 
-  poseLandmarker = await PoseLandmarker.createFromOptions(vision, {
-    baseOptions: {
-      modelAssetPath:
-        "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_heavy/float16/1/pose_landmarker_heavy.task",
+pose.setOptions({
+  modelComplexity: 1,
+  smoothLandmarks: true,
+  enableSegmentation: false,
+  selfieMode: true
+});
+
+// When pose results come in
+pose.onResults(onPoseDetected);
+
+// Camera
+let cam;
+function startCamera() {
+  cam = new Camera(video, {
+    onFrame: async () => {
+      await pose.send({ image: video });
     },
-    runningMode: "VIDEO",
-    numPoses: 1,
+    width: 720,
+    height: 1280
   });
-
-  startCamera();
+  cam.start();
 }
 
-async function startCamera() {
-  const stream = await navigator.mediaDevices.getUserMedia({
-    video: { facingMode: "user" },
-  });
-  video.srcObject = stream;
+startCamera();
 
-  video.onloadedmetadata = () => {
-    video.play();
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
-    running = true;
-    detectPose();
-  };
-}
-
-async function detectPose() {
-  if (!running) return;
-
-  const nowTs = performance.now();
-  const result = await poseLandmarker.detectForVideo(video, nowTs);
-
+// -------------------
+// MAIN POSE HANDLER
+// -------------------
+function onPoseDetected(results) {
+  canvas.width = video.videoWidth;
+  canvas.height = video.videoHeight;
   ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-  // No landmarks detected?
-  if (!result.landmarks || result.landmarks.length === 0) {
+  if (!results.poseLandmarks) {
     checkTimeout();
-    requestAnimationFrame(detectPose);
     return;
   }
 
-  // Reset timeout timer when pose detected
-  lastDetectedTime = Date.now();
+  lastDetected = Date.now();
   hideError();
 
-  // Use first pose
-  const lm = result.landmarks[0];
+  // Draw full or partial landmarks
+  drawConnectors(ctx, results.poseLandmarks, POSE_CONNECTIONS,
+    { color: "#00FFAA", lineWidth: 4 });
 
-  drawPartialLandmarks(lm);
-  calculatePartialMeasurements(lm);
+  drawLandmarks(ctx, results.poseLandmarks,
+    { color: "#FFDD55", radius: 5 });
 
-  requestAnimationFrame(detectPose);
+  computeMeasurements(results.poseLandmarks);
 }
 
-function drawPartialLandmarks(landmarks) {
-  ctx.fillStyle = "#00FF00";
-
-  landmarks.forEach((lm) => {
-    ctx.beginPath();
-    ctx.arc(lm.x * canvas.width, lm.y * canvas.height, 5, 0, 2 * Math.PI);
-    ctx.fill();
+// ---------------------------------------
+// MEASUREMENT LOGIC  (partial-friendly)
+// ---------------------------------------
+function computeMeasurements(lm) {
+  const getPx = p => ({
+    x: p.x * canvas.width,
+    y: p.y * canvas.height
   });
-}
 
-function calculatePartialMeasurements(lm) {
-  // Sample partial measurement: shoulder width
-  if (lm[11] && lm[12]) {
-    const shoulderDist = Math.hypot(
-      (lm[11].x - lm[12].x) * canvas.width,
-      (lm[11].y - lm[12].y) * canvas.height
-    );
-    console.log("Shoulder Width (px):", shoulderDist);
+  function dist(a, b) {
+    if (!a || !b) return null;
+    const pa = getPx(a);
+    const pb = getPx(b);
+    return Math.hypot(pa.x - pb.x, pa.y - pb.y);
   }
 
-  // Add more body parts as needed
+  const shoulders = dist(lm[11], lm[12]);
+  const hips = dist(lm[23], lm[24]);
+  const fullHeight = lm[0] && lm[28] ? dist(lm[0], lm[28]) : null;
+
+  let measurements = {
+    shoulderWidth_px: shoulders,
+    hipWidth_px: hips,
+    height_px: fullHeight
+  };
+
+  console.log("Measurements:", measurements);
 }
 
-// Check timeout if no human detected
+// ------------------
+// TIMEOUT HANDLER
+// ------------------
 function checkTimeout() {
-  const now = Date.now();
-
-  if (now - lastDetectedTime > TIMEOUT_MS) {
-    showError("No person detected for 30 seconds. Please adjust camera and retry.");
-    running = false;
+  if (Date.now() - lastDetected > TIMEOUT) {
+    showError("No person detected for 30 seconds.");
+    retryBtn.style.display = "block";
+    speak("I cannot detect a person. Please adjust the camera and click retry.");
+    cam.stop();
   }
 }
 
-function showError(msg) {
-  errorBox.style.display = "block";
-  errorBox.innerText = msg;
-}
+retryBtn.onclick = () => location.reload();
 
+// UI helpers
+function showError(t) {
+  msg.style.display = "block";
+  msg.innerText = t;
+}
 function hideError() {
-  errorBox.style.display = "none";
+  msg.style.display = "none";
+  retryBtn.style.display = "none";
 }
-
-initPose();
